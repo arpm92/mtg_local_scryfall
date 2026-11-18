@@ -284,6 +284,31 @@ class CollectionWebTests(unittest.TestCase):
             server.server_close()
             thread.join(timeout=2)
 
+    def test_unexpected_chat_exception_returns_json_instead_of_dropping_connection(self):
+        class FailingChat:
+            def ask(self, request, saved_decks, cards, model=None):
+                raise KeyError("fixture internal failure")
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), web.make_handler(
+            {"cards": [{"name": "Owned Card"}]}, chat=FailingChat()
+        ))
+        thread = Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        base = "http://127.0.0.1:{}".format(server.server_port)
+        try:
+            body = json.dumps({"message": "What do I own?", "history": []}).encode("utf-8")
+            request = Request(base + "/api/chat", data=body, headers={"Content-Type": "application/json"})
+            with self.assertRaises(HTTPError) as error:
+                urlopen(request)
+
+            self.assertEqual(error.exception.code, 500)
+            payload = json.loads(error.exception.read())
+            self.assertIn("failed unexpectedly", payload["error"])
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
     def test_chat_generated_deck_stays_a_draft_until_saved_through_deck_api(self):
         architect = web.load_architect()
         engine_cards = [

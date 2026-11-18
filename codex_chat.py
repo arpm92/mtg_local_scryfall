@@ -351,9 +351,13 @@ class CodexChat:
         plan_errors = self._deck_plan_errors(plan, deck, cards)
         if not validation["valid"] or plan_errors:
             repair_prompt = (
-                prompt + "\n\nYour previous draft failed validation. Fix all listed errors using only available card names and obey every rule. "
+                "{}\n\nYour previous draft failed validation. Fix all listed errors using only available card names and obey every rule. "
                 "Return the complete corrected JSON object only.\nValidation errors: {}\nPrevious draft: {}"
-            ).format(json.dumps(validation["errors"] + plan_errors, ensure_ascii=False), json.dumps(draft, ensure_ascii=False))
+            ).format(
+                prompt,
+                json.dumps(validation["errors"] + plan_errors, ensure_ascii=False),
+                json.dumps(draft, ensure_ascii=False),
+            )
             draft = self._parse_deck_response(self._turn(instructions, repair_prompt, model=model))
             deck, plan = self._deck_from_plan(draft, format_name, by_candidate, saved_decks)
             validation = architect.validate_deck(deck, engine_cards, format_name)

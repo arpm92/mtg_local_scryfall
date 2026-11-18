@@ -12,6 +12,7 @@ import re
 import shutil
 import sys
 import tempfile
+import traceback
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -654,6 +655,12 @@ def make_handler(payload, architect=None, engine_cards=None, auth_username="", a
                 self.send_json(400, {"error": str(error)})
             except (RuntimeError, TimeoutError, OSError) as error:
                 self.send_json(502, {"error": str(error)})
+            except Exception:
+                traceback.print_exc()
+                try:
+                    self.send_json(500, {"error": "The request failed unexpectedly. The server logged the error; please retry."})
+                except OSError:
+                    pass
 
         def do_DELETE(self):
             if not self.authorized():
