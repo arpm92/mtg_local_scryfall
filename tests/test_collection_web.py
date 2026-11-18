@@ -27,6 +27,24 @@ class CollectionWebTests(unittest.TestCase):
 
         self.assertIn("$('#card-dialog .dialog-close').addEventListener('click'", app_script)
 
+    def test_legacy_format_is_exposed_in_builder_battles_and_api_rules(self):
+        handler = web.make_handler({}, architect=web.load_architect())
+        server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        thread = Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with urlopen("http://127.0.0.1:{}/api/formats".format(server.server_port)) as response:
+                formats = json.loads(response.read())
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+        self.assertEqual(formats["legacy"]["main_min_size"], 60)
+        index = (Path(web.ROOT) / "web" / "index.html").read_text(encoding="utf-8")
+        app_script = (Path(web.ROOT) / "web" / "app.js").read_text(encoding="utf-8")
+        self.assertIn('<option value="legacy">Legacy</option>', index)
+        self.assertIn("'legacy'", app_script)
+
     def test_load_collection_and_cached_images(self):
         csv_path = self.root / "collection.csv"
         fields = ["Name", "Quantity", "Set code", "Set name", "Scryfall Oracle ID",
@@ -154,8 +172,8 @@ class CollectionWebTests(unittest.TestCase):
                 server.server_close()
                 thread.join(timeout=2)
 
-    def test_battle_endpoint_starts_valid_same_format_pauper_and_standard_pairs(self):
-        for format_name in ("pauper", "standard"):
+    def test_battle_endpoint_starts_valid_same_format_constructed_pairs(self):
+        for format_name in ("pauper", "standard", "legacy"):
             with self.subTest(format=format_name):
                 deck_a = {"name": "Deck A", "format": format_name, "main": {"Card A": 60}}
                 deck_b = {"name": "Deck B", "format": format_name, "main": {"Card B": 60}}
@@ -234,6 +252,17 @@ class CollectionWebTests(unittest.TestCase):
         self.assertEqual(len(result["moved"]), 3)
         self.assertFalse((directory / (slug + ".json")).exists())
         self.assertTrue(Path(result["trash"]).is_dir())
+
+    def test_archive_saved_legacy_deck_moves_complete_bundle_to_trash(self):
+        output = self.root / "outputs"
+        directory = output / "legacy"
+        directory.mkdir(parents=True)
+        (directory / "old-legal.json").write_text(json.dumps({
+            "name": "Old Legal", "format": "legacy", "main": {"Island": 60}
+        }), encoding="utf-8")
+        result = web.archive_saved_deck("legacy", "Old Legal", output)
+        self.assertEqual(len(result["moved"]), 1)
+        self.assertFalse((directory / "old-legal.json").exists())
 
     def test_network_handler_requires_basic_auth_except_healthcheck(self):
         handler = web.make_handler({}, auth_username="tester", auth_password="a-strong-test-password")

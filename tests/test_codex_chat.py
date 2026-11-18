@@ -143,6 +143,19 @@ class CodexChatTests(unittest.TestCase):
         result = chat.create_deck({"message": "Create a new deck"}, [], [], architect, [])
         self.assertIn("Which format", result["clarification"])
 
+    def test_legacy_is_recognized_for_deck_creation_and_followup(self):
+        request = {"message": "Create a Legacy Merfolk deck."}
+        self.assertTrue(CodexChat.is_deck_creation_request(request))
+        self.assertEqual(CodexChat._requested_format(request["message"]), "legacy")
+        resolved = CodexChat.pending_deck_creation_request({
+            "message": "Legacy",
+            "history": [
+                {"role": "user", "content": "Create a Merfolk deck."},
+                {"role": "assistant", "content": "Which format should I use?"},
+            ],
+        })
+        self.assertEqual(resolved, "Create a Merfolk deck. Legacy")
+
     def test_chat_retrieval_keeps_exact_card_name_outside_relevance_limit(self):
         cards = [
             {"name": "A distraction {:03d}".format(index), "typeLine": "Creature",

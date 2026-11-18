@@ -298,7 +298,7 @@ def group_cards(cards):
 
 def archive_saved_deck(format_name, deck_name, outputs_root=ROOT / "outputs"):
     """Move a saved deck bundle to a recoverable trash directory."""
-    if format_name not in ("commander", "pauper", "standard"):
+    if format_name not in ("commander", "pauper", "standard", "legacy"):
         raise ValueError("Unsupported deck format.")
     format_dir = (Path(outputs_root) / format_name).resolve()
     if not format_dir.is_dir():
@@ -405,7 +405,7 @@ def make_handler(payload, architect=None, engine_cards=None, auth_username="", a
 
         def saved_decks(self):
             result = []
-            for format_name in ("commander", "pauper", "standard"):
+            for format_name in ("commander", "pauper", "standard", "legacy"):
                 directory = ROOT / "outputs" / format_name
                 if not directory.is_dir():
                     continue
@@ -439,11 +439,11 @@ def make_handler(payload, architect=None, engine_cards=None, auth_username="", a
                 return
             if path == "/api/formats":
                 values = {}
-                for name in ("commander", "pauper", "standard"):
+                for name in ("commander", "pauper", "standard", "legacy"):
                     config = architect.load_format(name)
                     values[name] = {key: config.get(key, 0) for key in (
                         "display_name", "main_size", "sideboard_max", "sideboard_target",
-                        "copy_limit", "commander_min", "commander_max"
+                        "main_min_size", "copy_limit", "commander_min", "commander_max"
                     )}
                 self.send_json(200, values)
                 return
@@ -464,7 +464,7 @@ def make_handler(payload, architect=None, engine_cards=None, auth_username="", a
                 return
             if path == "/api/simulations/config":
                 formats = {}
-                for name in ("commander", "pauper", "standard"):
+                for name in ("commander", "pauper", "standard", "legacy"):
                     config = architect.load_format(name)
                     formats[name] = {
                         "players": config["simulation"]["players"],
@@ -517,8 +517,8 @@ def make_handler(payload, architect=None, engine_cards=None, auth_username="", a
                         return
                     format_name = str(submitted.get("format") or "").casefold()
                     if submitted.get("mode") == "battle":
-                        if format_name not in ("pauper", "standard"):
-                            raise ValueError("Deck battles support Pauper and Standard; Commander uses four-player simulations.")
+                        if format_name not in ("pauper", "standard", "legacy"):
+                            raise ValueError("Deck battles support Pauper, Standard, and Legacy; Commander uses four-player simulations.")
                         saved = self.saved_decks()
                         deck_a_name = str(submitted.get("deckA") or "")
                         deck_b_name = str(submitted.get("deckB") or "")
@@ -623,8 +623,8 @@ def make_handler(payload, architect=None, engine_cards=None, auth_username="", a
                     self.send_json(200, {"answer": answer})
                     return
                 format_name = str(submitted.get("format") or "").lower()
-                if format_name not in ("commander", "pauper", "standard"):
-                    raise ValueError("Choose Commander, Pauper, or Standard.")
+                if format_name not in ("commander", "pauper", "standard", "legacy"):
+                    raise ValueError("Choose Commander, Pauper, Standard, or Legacy.")
                 name = str(submitted.get("name") or "Untitled Deck").strip()[:100]
                 deck = {
                     "name": name, "format": format_name,

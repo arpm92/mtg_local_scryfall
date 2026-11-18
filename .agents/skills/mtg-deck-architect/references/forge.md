@@ -22,6 +22,7 @@ The installed `AutomatedTestDeck` harness is Commander-specific and supports fou
 
 - Keep raw stdout/stderr and machine-readable `Game Result` lines.
 - A normal result must have one winner. Timeouts, draws, engine errors, invalid results, and process failures are not losses.
+- Treat Forge output containing `unsupported card was requested` or `could not find this card in the Database` as an unsupported run even when Forge also prints a normal winner. Preserve the raw result and logs, but count zero completed games for that run.
 - One-game runs are smoke tests only.
 - For Commander, do not turn 1v1 evidence into multiplayer power claims.
 - For constructed formats, do not compare across formats and do not call a match sanctioned-format evidence until both decks pass the independent validator.
@@ -31,4 +32,5 @@ The installed `AutomatedTestDeck` harness is Commander-specific and supports fou
 - Forge CLI does not enforce Standard rotation/bans or Pauper rarity/bans by format name.
 - The generic simulation CLI does not provide an observable sideboard-plan API.
 - Forge AI strength and card support vary; win rate is one metric among consistency, curve, interaction, resilience, diagnostics, and human review.
+- The installed 2.0.16 build does not include every recently released or custom-set card in the collection. Verify stdout/stderr before using a result; unsupported-card warnings make the game result unusable for deck comparison.
 - Commander bracket calculation exists in the Forge source and reads `res/lists/gamechangers.txt` plus combo data, but the Python engine's classification remains advisory.

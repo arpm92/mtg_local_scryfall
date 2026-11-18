@@ -1,0 +1,26 @@
+{
+  "name": "legacy",
+  "display_name": "Legacy",
+  "main_size": 60,
+  "main_min_size": 60,
+  "total_size": null,
+  "sideboard_max": 15,
+  "sideboard_target": 15,
+  "copy_limit": 4,
+  "singleton": false,
+  "starting_life": 20,
+  "legality_field": "legacy",
+  "basic_lands_unlimited": true,
+  "refresh_legality_before_build": true,
+  "simulation": {
+    "forge_game_type": "constructed",
+    "players": 2,
+    "match_games": 3,
+    "seat_rotation": true,
+    "preferred_mode": "best_of_three"
+  },
+  "metrics": ["completed_games", "game_win_rate", "turns", "consistency", "interaction", "threat_efficiency", "sideboard_coverage"],
+  "default_land_count": 22,
+  "rules_url": "https://magic.wizards.com/en/formats/legacy",
+  "banned_url": "https://magic.wizards.com/en/banned-restricted-list"
+}

@@ -45,8 +45,8 @@ class ForgeSimulationService:
         if not self.available():
             raise RuntimeError("Forge simulation is unavailable: Java 17 and the Forge installation are required.")
         format_name = str(deck.get("format") or "").casefold()
-        if format_name not in ("commander", "pauper", "standard"):
-            raise ValueError("Only Commander, Pauper, and Standard decks can be simulated.")
+        if format_name not in ("commander", "pauper", "standard", "legacy"):
+            raise ValueError("Only Commander, Pauper, Standard, and Legacy decks can be simulated.")
         config = self.architect.load_format(format_name)
         try:
             games = int(games)
@@ -137,13 +137,22 @@ class ForgeSimulationService:
                 stdout_parts.append("=== Game {} / seed {} / seats {} ===\n{}".format(
                     index + 1, game_seed, ", ".join(path.stem for path in rotated_paths), result.get("stdout", "")))
                 stderr_parts.append("=== Game {} / seed {} ===\n{}".format(index + 1, game_seed, result.get("stderr", "")))
+                forge_output = "\n".join((result.get("stdout", ""), result.get("stderr", "")))
+                unsupported_cards = sorted(set(re.findall(
+                    r'unsupported card was requested:\s*["\u201c](.*?)["\u201d]',
+                    forge_output,
+                    flags=re.IGNORECASE,
+                )))
+                unsupported = bool(unsupported_cards) or "could not find this card in the database" in forge_output.casefold()
                 game_runs.append({
                     "game": index + 1,
                     "seed": game_seed,
                     "seat_order": [path.stem for path in rotated_paths],
-                    "status": result.get("status"),
-                    "completed_games": int(result.get("completed_games") or 0),
-                    "game_results": result.get("game_results", []),
+                    "status": "unsupported" if unsupported else result.get("status"),
+                    "completed_games": 0 if unsupported else int(result.get("completed_games") or 0),
+                    "game_results": [] if unsupported else result.get("game_results", []),
+                    "reported_game_results": result.get("game_results", []) if unsupported else [],
+                    "unsupported_cards": unsupported_cards,
                     "exit_code": result.get("exit_code"),
                     "command": result.get("command", []),
                 })
@@ -151,7 +160,12 @@ class ForgeSimulationService:
             (job_dir / "stderr.log").write_text("\n".join(stderr_parts), encoding="utf-8")
             completed = sum(run["completed_games"] for run in game_runs)
             result_lines = [line for run in game_runs for line in run["game_results"]]
-            if completed == games:
+            unsupported_cards = sorted(set(
+                name for run in game_runs for name in run.get("unsupported_cards", [])
+            ))
+            if unsupported_cards or any(run["status"] == "unsupported" for run in game_runs):
+                status = "unsupported"
+            elif completed == games:
                 status = "completed"
             elif any(run["status"] == "timeout" for run in game_runs):
                 status = "timeout"
@@ -166,12 +180,18 @@ class ForgeSimulationService:
                 "game_runs": game_runs,
                 "game_results": result_lines,
                 "commands": [run.get("command") for run in game_runs if run.get("command")],
+                "unsupported_cards": unsupported_cards,
                 "stdout_log": str((job_dir / "stdout.log").relative_to(self.output_root)),
                 "stderr_log": str((job_dir / "stderr.log").relative_to(self.output_root)),
                 "finished_at": _now(),
             }
             if status != "completed":
-                update["message"] = "Forge completed {} of {} requested games; review the saved logs.".format(completed, games)
+                if status == "unsupported":
+                    update["message"] = "Forge could not be simulated faithfully because it does not support: {}. These games do not count as completed.".format(
+                        ", ".join(unsupported_cards) or "one or more cards"
+                    )
+                else:
+                    update["message"] = "Forge completed {} of {} requested games; review the saved logs.".format(completed, games)
         except Exception as error:  # Preserve failures for diagnosis in the report.
             (job_dir / "error.log").write_text(str(error), encoding="utf-8")
             update = {
@@ -193,7 +213,7 @@ class ForgeSimulationService:
         with self.lock:
             if job_id in self.jobs:
                 return dict(self.jobs[job_id])
-        for format_name in ("commander", "pauper", "standard"):
+        for format_name in ("commander", "pauper", "standard", "legacy"):
             path = self.output_root / format_name / "simulations" / job_id / "simulation.json"
             if path.is_file():
                 try:

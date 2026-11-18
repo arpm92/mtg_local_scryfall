@@ -1,6 +1,6 @@
 ---
 name: mtg-deck-architect
-description: Build synergy-first, collection-constrained Commander, Pauper, and Standard decks using card-level Oracle analysis, researched strategy, independent legality checks, and evidence-based Forge testing. Use for deck construction, optimization, matchup analysis, and deck reports; do not use for unrelated card rulings or invented metagame statistics.
+description: Build synergy-first, collection-constrained Commander, Pauper, Standard, and Legacy decks using card-level Oracle analysis, researched strategy, independent legality checks, and evidence-based Forge testing. Use for deck construction, optimization, matchup analysis, and deck reports; do not use for unrelated card rulings or invented metagame statistics.
 ---
 
 # MTG Deck Architect
@@ -9,7 +9,7 @@ Build only from the latest verified collection inventory. Strategy and functiona
 
 ## Route the request
 
-1. Infer or confirm `commander`, `pauper`, or `standard` from the request. Never simulate decks from different formats as sanctioned matchup evidence.
+1. Infer or confirm `commander`, `pauper`, `standard`, or `legacy` from the request. Never simulate decks from different formats as sanctioned matchup evidence.
 2. Read the matching file in `formats/`. It is JSON-compatible YAML loaded by the shared standard-library engine.
 3. For format rules and interpretation, read [references/formats.md](references/formats.md). For Forge execution or result interpretation, also read [references/forge.md](references/forge.md).
 4. Use `scripts/architect.py` through the project `.venv`; do not reimplement validation, ownership checks, export, or Forge invocation ad hoc.
@@ -46,6 +46,7 @@ Save attempted/completed/failed games, wins/losses, seed, position, opponent, tu
 .\.venv\Scripts\python.exe .agents\skills\mtg-deck-architect\scripts\architect.py analyze commander
 .\.venv\Scripts\python.exe .agents\skills\mtg-deck-architect\scripts\architect.py build pauper --count 5 --archetype artifact
 .\.venv\Scripts\python.exe .agents\skills\mtg-deck-architect\scripts\architect.py build standard --count 3 --power-target competitive
+.\.venv\Scripts\python.exe .agents\skills\mtg-deck-architect\scripts\architect.py build legacy --count 1 --archetype merfolk tempo
 .\.venv\Scripts\python.exe .agents\skills\mtg-deck-architect\scripts\architect.py validate outputs\standard\deck.json
 ```
 

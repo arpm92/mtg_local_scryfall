@@ -27,7 +27,8 @@ COLOR_ORDER = "WUBRG"
 def load_format(name):
     path = FORMATS_DIR / (str(name).lower() + ".yaml")
     if not path.is_file():
-        raise ValueError("Unsupported format '{}'. Available: commander, pauper, standard".format(name))
+        available = ", ".join(sorted(item.stem for item in FORMATS_DIR.glob("*.yaml")))
+        raise ValueError("Unsupported format '{}'. Available: {}".format(name, available))
     return json.loads(path.read_text(encoding="utf-8"))
 
 
@@ -186,7 +187,11 @@ def validate_deck(deck, cards, format_name=None, config=None, respect_ownership=
     main_count = sum(sections["main"].values())
     side_count = sum(sections["sideboard"].values())
     commander_count = sum(sections["commanders"].values())
-    if main_count != config["main_size"]:
+    if config.get("main_min_size") is not None:
+        if main_count < config["main_min_size"]:
+            errors.append("Main deck has {} cards; {} requires a minimum of {}.".format(
+                main_count, config["display_name"], config["main_min_size"]))
+    elif main_count != config["main_size"]:
         errors.append("Main deck has {} cards; {} requires exactly {}.".format(main_count, config["display_name"], config["main_size"]))
     if side_count > config["sideboard_max"]:
         errors.append("Sideboard has {} cards; maximum is {}.".format(side_count, config["sideboard_max"]))
@@ -542,6 +547,23 @@ def render_report(deck):
             sections.append("")
     if validation.get("errors"):
         sections.extend(["## Validation errors", ""] + ["- " + error for error in validation["errors"]])
+    evidence = deck.get("forge_evidence")
+    if evidence:
+        sections.extend(["## Forge evidence", "", "- Status: {}".format(evidence.get("status", "not run"))])
+        if evidence.get("opponent"):
+            sections.append("- Opponent: {}".format(evidence["opponent"]))
+        if evidence.get("simulation_id"):
+            sections.append("- Simulation record: `outputs/{}/simulations/{}/simulation.json`".format(
+                deck.get("format", ""), evidence["simulation_id"]))
+        if evidence.get("attempted_games") is not None:
+            sections.append("- Attempted/completed games: {}/{}".format(
+                evidence["attempted_games"], evidence.get("completed_games", 0)))
+        if evidence.get("wins") is not None:
+            sections.append("- Wins/losses: {}/{}".format(evidence["wins"], evidence.get("losses", 0)))
+        if evidence.get("unsupported_cards"):
+            sections.append("- Unsupported cards: {}".format(", ".join(evidence["unsupported_cards"])))
+        if evidence.get("note"):
+            sections.extend(["", evidence["note"]])
     return "\n".join(sections) + "\n"
 
 
@@ -551,9 +573,10 @@ def main(argv=None):
     parser.add_argument("--bulk", default=str(DEFAULT_BULK))
     sub = parser.add_subparsers(dest="command", required=True)
     analyze = sub.add_parser("analyze")
-    analyze.add_argument("format", choices=("commander", "pauper", "standard"))
+    format_choices = tuple(sorted(item.stem for item in FORMATS_DIR.glob("*.yaml")))
+    analyze.add_argument("format", choices=format_choices)
     build = sub.add_parser("build")
-    build.add_argument("format", choices=("commander", "pauper", "standard"))
+    build.add_argument("format", choices=format_choices)
     build.add_argument("--count", type=int, default=1)
     build.add_argument("--colors")
     build.add_argument("--archetype")
@@ -563,7 +586,7 @@ def main(argv=None):
     validate = sub.add_parser("validate")
     validate.add_argument("deck_json")
     simulate = sub.add_parser("simulate")
-    simulate.add_argument("format", choices=("commander", "pauper", "standard"))
+    simulate.add_argument("format", choices=format_choices)
     simulate.add_argument("decks", nargs="+")
     simulate.add_argument("--games", type=int, default=1)
     simulate.add_argument("--best-of", type=int)

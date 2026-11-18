@@ -340,7 +340,9 @@ function renderDeckBuilder() {
   $('#commander-section').hidden = format !== 'commander'; $('#sideboard-section').hidden = format === 'commander' || scanned;
   if (scanned) $('#deck-status').textContent = 'Scanned deck · unclassified · card copies reserved in your collection.';
   $('#commander-total').textContent = `${deckTotal('commanders')} / ${config.commander_min || 0}`;
-  $('#main-total').textContent = `${deckTotal('main')} / ${config.main_size}`;
+  $('#main-total').textContent = config.main_min_size
+    ? `${deckTotal('main')} / ${config.main_min_size}+ minimum`
+    : `${deckTotal('main')} / ${config.main_size}`;
   $('#sideboard-total').textContent = `${deckTotal('sideboard')} / ${config.sideboard_target}`;
   const selected = Object.entries(state.deck.main).map(([name,count]) => ({card: state.all.find(item => item.name === name), count}));
   const lands = selected.reduce((sum,item) => sum + (item.card?.typeLine.includes('Land') ? item.count : 0), 0);
@@ -486,7 +488,7 @@ $('#hand-reset').addEventListener('click', () => {
 });
 
 function updateBattleButton() {
-  const availableDecks = state.savedDecks.filter(deck => deck.format === 'pauper' || deck.format === 'standard');
+  const availableDecks = state.savedDecks.filter(deck => ['pauper', 'standard', 'legacy'].includes(deck.format));
   $('#battle-decks').disabled = !state.simulationAvailable || availableDecks.length < 2;
   $('#battle-decks').title = !state.simulationAvailable
     ? 'Forge runtime or installation is unavailable on the server.'
@@ -537,8 +539,8 @@ function populateBattleDecks() {
 function openBattleDialog() {
   if (!state.simulationAvailable) return;
   setBattlePending(false);
-  const currentFormat = ['pauper', 'standard'].includes(state.deckInfo?.format) ? state.deckInfo.format : '';
-  const defaultFormat = currentFormat || ['standard', 'pauper'].find(format =>
+  const currentFormat = ['pauper', 'standard', 'legacy'].includes(state.deckInfo?.format) ? state.deckInfo.format : '';
+  const defaultFormat = currentFormat || ['standard', 'pauper', 'legacy'].find(format =>
     state.savedDecks.filter(deck => deck.format === format).length > 1) || 'pauper';
   $('#battle-format').value = defaultFormat;
   $('#battle-games').value = '10';
@@ -553,7 +555,7 @@ function openBattleDialog() {
   battleDialog.showModal();
 }
 function showBattleJob(job) {
-  const complete = ['completed', 'partial', 'failed', 'timeout', 'interrupted'].includes(job.status);
+  const complete = ['completed', 'partial', 'failed', 'timeout', 'interrupted', 'unsupported'].includes(job.status);
   const status = $('#battle-status');
   status.className = `simulation-status ${complete && job.status !== 'completed' ? 'error' : complete ? 'success' : ''}`;
   if (job.status === 'queued' || job.status === 'running') {
@@ -649,7 +651,7 @@ function openSimulationDialog() {
   simulationDialog.showModal();
 }
 function showSimulationJob(job) {
-  const complete = ['completed','partial','failed','timeout','interrupted'].includes(job.status);
+  const complete = ['completed','partial','failed','timeout','interrupted','unsupported'].includes(job.status);
   $('#simulation-status').className = `simulation-status ${complete && job.status !== 'completed' ? 'error' : complete ? 'success' : ''}`;
   if (job.status === 'queued' || job.status === 'running') {
     $('#simulation-status').textContent = job.status === 'queued' ? 'Simulation queued…' : `Forge is running (${job.completed_games || 0}/${job.games_requested} games reported)…`;

@@ -190,13 +190,13 @@ class CodexChat:
         message = str(request.get("message") or "").casefold()
         if re.match(r"\s*(how|why|what|when|where)\b", message):
             return False
-        explicit_new = re.search(r"\b(?:new|fresh|another|additional|second)\s+(?:commander|pauper|standard)?\s*deck\b", message)
-        refers_to_existing = re.search(r"\b(?:my|this|current|existing|selected)\s+(?:commander|pauper|standard)?\s*deck\b", message)
+        explicit_new = re.search(r"\b(?:new|fresh|another|additional|second)\s+(?:commander|pauper|standard|legacy)?\s*deck\b", message)
+        refers_to_existing = re.search(r"\b(?:my|this|current|existing|selected)\s+(?:commander|pauper|standard|legacy)?\s*deck\b", message)
         if refers_to_existing and not explicit_new:
             return False
         has_deck = re.search(r"\b(deck|decklist|brew)\b", message)
         create_verb = re.search(r"\b(create|build|make|generate|brew|design|put together)\b", message)
-        wants_deck = re.search(r"\b(?:i(?:'d| would| want| need| would love)|please)\b.{0,60}\b(?:new|fresh|another|a|an)?\s*(?:commander|pauper|standard)?\s*deck\b", message)
+        wants_deck = re.search(r"\b(?:i(?:'d| would| want| need| would love)|please)\b.{0,60}\b(?:new|fresh|another|a|an)?\s*(?:commander|pauper|standard|legacy)?\s*deck\b", message)
         return bool(has_deck and (create_verb or explicit_new or wants_deck))
 
     @staticmethod
@@ -226,7 +226,7 @@ class CodexChat:
             ), "")
             if original_request:
                 return original_request
-        if re.fullmatch(r"(?:commander|edh|pauper|standard)[.!]?", message, re.IGNORECASE) and re.search(
+        if re.fullmatch(r"(?:commander|edh|pauper|standard|legacy)[.!]?", message, re.IGNORECASE) and re.search(
             r"which format should i use|what format should i use", assistant_turn[1], re.IGNORECASE
         ):
             prior_request = next((
@@ -277,8 +277,8 @@ class CodexChat:
         selected_name = str(request.get("deckName") or "")[:100]
         selected_deck = next((deck for deck in saved_decks if deck.get("name") == selected_name), None)
         format_name = self._requested_format(question) or (selected_deck or {}).get("format")
-        if format_name not in ("commander", "pauper", "standard"):
-            return {"clarification": "Which format should I use: Commander, Pauper, or Standard? I have not created a deck yet."}
+        if format_name not in ("commander", "pauper", "standard", "legacy"):
+            return {"clarification": "Which format should I use: Commander, Pauper, Standard, or Legacy? I have not created a deck yet."}
 
         config = architect.load_format(format_name)
         candidates = []
@@ -379,7 +379,7 @@ class CodexChat:
         text = message.casefold()
         if re.search(r"\b(commander|edh)\b", text):
             return "commander"
-        for name in ("pauper", "standard"):
+        for name in ("pauper", "standard", "legacy"):
             if re.search(r"\b{}\b".format(name), text):
                 return name
         return None

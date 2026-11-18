@@ -6,7 +6,7 @@ This stack packages the collection and deck builder, and installs Codex CLI for 
 
 1. Put a checkout of this repository on the home server (for example, `E:\repos\mtg`). Keep the collection, `.scryfall_cache`, `outputs`, and `.codex-home` on that host so Docker can bind-mount them.
 2. Copy `.env.portainer.example` to a server-local `.env.portainer`. Set the Windows paths and the server's LAN address. If using Portainer's Git stack, enter the same values under **Environment variables**.
-3. Confirm the enriched CSV and `.scryfall_cache\oracle_cards.jsonl.gz` exist and that `outputs\commander`, `outputs\pauper`, `outputs\standard`, and `.codex-home` are writable by Docker Desktop. Create the Codex data directory before deploying: `New-Item -ItemType Directory -Force .codex-home`.
+3. Confirm the enriched CSV and `.scryfall_cache\oracle_cards.jsonl.gz` exist and that `outputs\commander`, `outputs\pauper`, `outputs\standard`, `outputs\legacy`, and `.codex-home` are writable by Docker Desktop. Create the Codex data directory before deploying: `New-Item -ItemType Directory -Force .codex-home`.
 
 ## Deploy in Portainer
 
@@ -26,4 +26,4 @@ OpenAI documents ChatGPT-plan use through Codex app-server as a preview. A remot
 
 ## Forge
 
-The image installs OpenJDK 17 and downloads Forge 2.0.16 from the official release with a pinned SHA-256 digest. Use **Decks → Run Forge simulation** after selecting a saved deck. Choose one same-format opponent for Pauper/Standard or three for four-player Commander. The runner validates each list independently, defaults to 10 games, rotates the seat order, and saves a manifest plus stdout/stderr logs beneath `outputs/<format>/simulations/`. It runs only one simulation job at a time with a 2 GB Java heap. Standard and Pauper simulations are 1v1 games, not BO3 sideboard tests; Forge does not enforce those formats' bans or rotation.
+The image installs OpenJDK 17 and downloads Forge 2.0.16 from the official release with a pinned SHA-256 digest. Use **Decks → Run Forge simulation** after selecting a saved deck. Choose one same-format opponent for Pauper/Standard/Legacy or three for four-player Commander. The runner validates each list independently, defaults to 10 games, rotates the seat order, and saves a manifest plus stdout/stderr logs beneath `outputs/<format>/simulations/`. It runs only one simulation job at a time with a 2 GB Java heap. Constructed simulations are 1v1 games, not BO3 sideboard tests; Forge does not enforce constructed-format bans or legality. Logs that report unsupported cards are flagged and excluded from completed-game statistics even when Forge also prints a winner.

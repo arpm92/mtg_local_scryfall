@@ -25,6 +25,12 @@ Read the selected `formats/<name>.yaml` first. These notes explain decisions tha
 - Optional metagame analysis requires current, cited tournament data. Never invent shares, win rates, or matchup percentages.
 - Use only independently validated Standard opponents.
 
+## Legacy
+
+- Build at least 60 main-deck cards and at most 15 sideboard cards; apply the four-copy combined main/sideboard limit except for basic lands and card-text exceptions.
+- Legacy does not rotate. Check refreshed `legalities.legacy` for every card, which includes the current banned list; do not infer legality from printing age or another format's status.
+- Use generic Forge `constructed` simulations and validate legality independently. Only use Legacy-legal opponents for Legacy matchup evidence.
+
 ## Ownership
 
 Nonbasic cards may not exceed the summed collection quantity across main, sideboard, and commander sections. Basic lands are unlimited only when `basic_lands_unlimited` is enabled. Upgrade suggestions must be separate from an owned deck and clearly labeled as purchases.

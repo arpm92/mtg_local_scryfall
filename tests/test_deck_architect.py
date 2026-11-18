@@ -17,7 +17,7 @@ def make_card(name, quantity=4, legal=True, colors=None, type_line="Creature —
         "name": name, "oracle_id": name.lower(), "quantity": quantity,
         "type_line": type_line, "oracle_text": text, "mana_cost": "", "mana_value": mv,
         "colors": colors, "color_identity": colors, "keywords": [], "produced_mana": [],
-        "legalities": {key: "legal" if legal else "not_legal" for key in ("commander", "pauper", "standard")},
+        "legalities": {key: "legal" if legal else "not_legal" for key in ("commander", "pauper", "standard", "legacy")},
         "layout": "normal", "power": "2", "toughness": "2", "rarity": "common",
         "printings": [{"set": "TST", "collector": "1", "quantity": quantity}],
     }
@@ -28,6 +28,27 @@ class DeckArchitectTests(unittest.TestCase):
         self.assertEqual(engine.load_format("commander")["total_size"], 100)
         self.assertEqual(engine.load_format("pauper")["legality_field"], "pauper")
         self.assertEqual(engine.load_format("standard")["simulation"]["forge_game_type"], "constructed")
+
+    def test_legacy_allows_sixty_or_more_cards_and_checks_legacy_bans(self):
+        legal_spell = make_card("Legacy Spell", quantity=4)
+        basic = make_card("Island", quantity=1, type_line="Basic Land — Island")
+        banned = make_card("Banned Card", quantity=1)
+        banned["legalities"]["legacy"] = "not_legal"
+        config = engine.load_format("legacy")
+        deck = {"format": "legacy", "main": {"Legacy Spell": 4, "Island": 57},
+                "sideboard": {}, "commanders": {}}
+        self.assertTrue(engine.validate_deck(deck, [legal_spell, basic], respect_ownership=True)["valid"])
+        deck["main"]["Banned Card"] = 1
+        self.assertFalse(engine.validate_deck(deck, [legal_spell, basic, banned], config=config)["valid"])
+
+    def test_legacy_rejects_fewer_than_sixty_main_deck_cards(self):
+        card = make_card("Legacy Spell", quantity=4)
+        island = make_card("Island", quantity=1, type_line="Basic Land — Island")
+        deck = {"format": "legacy", "main": {"Legacy Spell": 4, "Island": 55},
+                "sideboard": {}, "commanders": {}}
+        result = engine.validate_deck(deck, [card, island])
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("minimum of 60" in error for error in result["errors"]))
 
     def test_pauper_uses_legality_not_owned_rarity(self):
         card = make_card("Common Somewhere")
@@ -60,6 +81,19 @@ class DeckArchitectTests(unittest.TestCase):
             text = path.read_text(encoding="utf-8")
         self.assertIn("[Main]", text)
         self.assertIn("[Sideboard]", text)
+
+    def test_deck_report_shows_forge_limitations_and_evidence(self):
+        text = engine.render_report({
+            "name": "Legacy Test", "format": "legacy", "main": {"Island": 60},
+            "sideboard": {}, "commanders": {}, "report": {}, "validation": {"valid": True},
+            "forge_evidence": {
+                "status": "unsupported", "attempted_games": 10, "completed_games": 0,
+                "unsupported_cards": ["Example Card"], "note": "These games do not count."
+            },
+        })
+        self.assertIn("Attempted/completed games: 10/0", text)
+        self.assertIn("Unsupported cards: Example Card", text)
+        self.assertIn("These games do not count.", text)
 
     def test_forge_runner_refuses_wrong_player_count_before_launch(self):
         value = engine.run_forge_simulation(["one.dck"], "pauper")
