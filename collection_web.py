@@ -20,6 +20,7 @@ from urllib.parse import urlparse
 from enrich_mtg_collection import iter_oracle_cards, read_csv
 from collection_allocation import annotate_card_availability, summarize_allocations
 from collection_import import CollectionImportStore, prepare_upload
+from forge_simulation import ForgeSimulationService, SimulationBusyError
 
 
 ROOT = Path(__file__).resolve().parent
@@ -335,7 +336,11 @@ def make_handler(payload, architect=None, engine_cards=None, auth_username="", a
     import_store = import_store or CollectionImportStore(ROOT / "outputs" / "collection_imports.json")
     collection_csv = Path(collection_csv or DEFAULT_COLLECTION)
     bulk_path = Path(bulk_path) if bulk_path else choose_bulk_file(cache_dir)
-    state = {"payload": payload, "engine_cards": engine_cards}
+    forge_dir = Path(os.environ.get("MTG_FORGE_DIR") or getattr(architect, "DEFAULT_FORGE", "/forge"))
+    simulation_service = ForgeSimulationService(
+        architect, engine_cards or [], forge_dir, ROOT / "outputs"
+    ) if architect else None
+    state = {"payload": payload, "engine_cards": engine_cards, "simulations": simulation_service}
     static_routes = {
         "/": ("index.html", "text/html; charset=utf-8"),
         "/index.html": ("index.html", "text/html; charset=utf-8"),
@@ -353,6 +358,8 @@ def make_handler(payload, architect=None, engine_cards=None, auth_username="", a
             current_engine_cards = architect.load_collection(runtime_csv, bulk_path) if architect else []
             state["payload"] = current_payload
             state["engine_cards"] = current_engine_cards
+            if simulation_service:
+                simulation_service.cards = current_engine_cards
 
         def current_deck_cards(self, exclude_name=None, exclude_format=None, display=False):
             decks = [deck for deck in self.saved_decks() if not (
@@ -443,6 +450,35 @@ def make_handler(payload, architect=None, engine_cards=None, auth_username="", a
             if path == "/api/chat/status":
                 self.send_json(200, chat.status() if chat else {"available": False, "message": "Codex chat is not configured."})
                 return
+            if path == "/api/chat/models":
+                if not chat:
+                    self.send_json(503, {"error": "Codex chat is not configured on this server."})
+                    return
+                try:
+                    self.send_json(200, {"models": chat.model_options()})
+                except (RuntimeError, TimeoutError, OSError) as error:
+                    self.send_json(502, {"error": "Codex could not load its model list: {}".format(error), "models": []})
+                return
+            if path == "/api/simulations/config":
+                formats = {}
+                for name in ("commander", "pauper", "standard"):
+                    config = architect.load_format(name)
+                    formats[name] = {
+                        "players": config["simulation"]["players"],
+                        "opponents": config["simulation"]["players"] - 1,
+                        "gameType": config["simulation"]["forge_game_type"],
+                    }
+                self.send_json(200, {"available": bool(simulation_service and simulation_service.available()),
+                                     "formats": formats, "maxGames": 10})
+                return
+            if path.startswith("/api/simulations/"):
+                job_id = path.rsplit("/", 1)[-1]
+                result = simulation_service.get(job_id) if simulation_service else None
+                if result is None:
+                    self.send_json(404, {"error": "Simulation job not found."})
+                else:
+                    self.send_json(200, result)
+                return
             route = static_routes.get(path)
             if route:
                 body = (WEB_ROOT / route[0]).read_bytes()
@@ -459,15 +495,47 @@ def make_handler(payload, architect=None, engine_cards=None, auth_username="", a
             path = urlparse(self.path).path
             if not self.authorized():
                 return
-            if path not in ("/api/decks", "/api/chat", "/api/import"):
+            if path not in ("/api/decks", "/api/chat", "/api/import", "/api/simulations"):
                 self.send_error(404, "Not found")
                 return
             try:
                 length = int(self.headers.get("Content-Length", "0"))
-                limits = {"/api/chat": 200_000, "/api/decks": 2_000_000, "/api/import": 20_000_000}
+                limits = {"/api/chat": 200_000, "/api/decks": 2_000_000,
+                          "/api/import": 20_000_000, "/api/simulations": 100_000}
                 if length <= 0 or length > limits[path]:
                     raise ValueError("Invalid request size.")
                 submitted = json.loads(self.rfile.read(length).decode("utf-8"))
+                if path == "/api/simulations":
+                    if not simulation_service:
+                        self.send_json(503, {"error": "Deck architect is not configured."})
+                        return
+                    if not simulation_service.available():
+                        self.send_json(503, {"error": "Forge is not available. Check the Java runtime and mounted Forge installation."})
+                        return
+                    format_name = str(submitted.get("format") or "").casefold()
+                    deck_name = str(submitted.get("deckName") or "")
+                    saved = self.saved_decks()
+                    deck = next((item for item in saved if item.get("name") == deck_name
+                                 and item.get("format") == format_name), None)
+                    if not deck:
+                        raise ValueError("Choose a saved deck to simulate.")
+                    names = submitted.get("opponents")
+                    if not isinstance(names, list):
+                        raise ValueError("Choose same-format opponent decks.")
+                    opponents = []
+                    for name in names:
+                        found = next((item for item in saved if item.get("name") == str(name)
+                                      and item.get("format") == format_name and item is not deck), None)
+                        if not found:
+                            raise ValueError("Opponent '{}' is not a saved {} deck.".format(name, format_name.title()))
+                        opponents.append(found)
+                    try:
+                        job = simulation_service.start(deck, opponents, submitted.get("games", 10))
+                    except SimulationBusyError as error:
+                        self.send_json(409, {"error": str(error)})
+                        return
+                    self.send_json(202, job)
+                    return
                 if path == "/api/import":
                     encoded = submitted.get("csvBase64")
                     if not isinstance(encoded, str) or len(encoded) > 19_000_000:
@@ -500,9 +568,13 @@ def make_handler(payload, architect=None, engine_cards=None, auth_username="", a
                     if not chat:
                         self.send_json(503, {"error": "Codex chat is not configured on this server."})
                         return
+                    model = str(submitted.get("model") or "").strip()
+                    if model and not any(item.get("id") == model for item in chat.model_options()):
+                        raise ValueError("Choose a model from the available Codex model list.")
                     if hasattr(chat, "is_deck_creation_request") and chat.is_deck_creation_request(submitted):
                         created = chat.create_deck(
-                            submitted, self.saved_decks(), self.current_deck_cards(display=True), architect, state["engine_cards"]
+                            submitted, self.saved_decks(), self.current_deck_cards(display=True), architect,
+                            state["engine_cards"], model=model
                         )
                         if created.get("clarification"):
                             self.send_json(200, {"answer": created["clarification"]})
@@ -516,9 +588,10 @@ def make_handler(payload, architect=None, engine_cards=None, auth_username="", a
                             return
                         deck["validation"] = validation
                         files = architect.save_bundle(deck, state["engine_cards"], ROOT / "outputs")
-                        self.send_json(201, {"answer": created["answer"], "deck": deck, "files": files})
+                        answer = created["answer"] + "\n\nTo play it against Forge AI, open **Decks**, select this deck, choose same-format opponents, then select **Run Forge simulation**."
+                        self.send_json(201, {"answer": answer, "deck": deck, "files": files})
                         return
-                    answer = chat.ask(submitted, self.saved_decks(), state["payload"]["cards"])
+                    answer = chat.ask(submitted, self.saved_decks(), state["payload"]["cards"], model=model)
                     self.send_json(200, {"answer": answer})
                     return
                 format_name = str(submitted.get("format") or "").lower()

@@ -18,6 +18,8 @@ class CodexChat:
         self.command = command
         self.codex_home = Path(os.environ.get("CODEX_HOME", "~/.codex")).expanduser()
         self.timeout = timeout
+        self._models_cache = None
+        self._models_lock = threading.Lock()
 
     @classmethod
     def from_environment(cls):
@@ -45,7 +47,88 @@ class CodexChat:
             return {"available": False, "message": "Sign in to Codex once inside the server container to enable ChatGPT-plan chat."}
         return {"available": True, "message": "Codex app-server is configured. ChatGPT-plan credentials stay in the server-side Codex home."}
 
-    def ask(self, request, saved_decks, cards):
+    def model_options(self):
+        """Return the Codex app-server model catalog for the model picker."""
+        with self._models_lock:
+            if self._models_cache is not None:
+                return list(self._models_cache)
+            if not self.status()["available"]:
+                return []
+            env = os.environ.copy()
+            env["CODEX_HOME"] = str(self.codex_home)
+            proc = subprocess.Popen(
+                self._argv(), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                text=True, encoding="utf-8", errors="replace", bufsize=1, env=env,
+                cwd=os.environ.get("MTG_CODEX_CWD", os.path.abspath(os.sep)),
+            )
+            lines = queue.Queue()
+            reader = threading.Thread(target=self._read_lines, args=(proc.stdout, lines), daemon=True)
+            reader.start()
+
+            def send(value):
+                proc.stdin.write(json.dumps(value) + "\n")
+                proc.stdin.flush()
+
+            def response(request_id, deadline):
+                while time.monotonic() < deadline:
+                    try:
+                        item = lines.get(timeout=max(0.05, deadline - time.monotonic()))
+                    except queue.Empty:
+                        break
+                    if item is None:
+                        raise RuntimeError("Codex app-server closed unexpectedly while loading models.")
+                    try:
+                        value = json.loads(item)
+                    except ValueError:
+                        continue
+                    if value.get("method") and "id" in value:
+                        send({"id": value["id"], "result": {"decision": "decline"}})
+                    if value.get("id") == request_id:
+                        if "error" in value:
+                            raise RuntimeError(value["error"].get("message", "Codex model list failed."))
+                        return value.get("result") or {}
+                raise TimeoutError("Codex model list did not respond before the timeout.")
+
+            deadline = time.monotonic() + min(self.timeout, 30)
+            try:
+                send({"id": 1, "method": "initialize", "params": {
+                    "clientInfo": {"name": "mtg_collection_web", "title": "MTG Collection Web", "version": "1.0.0"},
+                    "capabilities": {"experimentalApi": True},
+                }})
+                response(1, deadline)
+                send({"method": "initialized", "params": {}})
+                send({"id": 2, "method": "model/list", "params": {"includeHidden": False, "limit": 100}})
+                result = response(2, deadline)
+                models = []
+                for item in result.get("data", []):
+                    slug = str(item.get("model") or item.get("id") or "").strip()
+                    if not slug:
+                        continue
+                    models.append({
+                        "id": slug,
+                        "name": str(item.get("displayName") or slug),
+                        "description": str(item.get("description") or ""),
+                        "isDefault": bool(item.get("isDefault")),
+                    })
+                self._models_cache = models
+                return list(models)
+            finally:
+                try:
+                    proc.terminate()
+                    proc.wait(timeout=3)
+                except (OSError, subprocess.TimeoutExpired):
+                    proc.kill()
+                    try:
+                        proc.wait(timeout=3)
+                    except subprocess.TimeoutExpired:
+                        pass
+                for stream in (proc.stdin, proc.stdout):
+                    try:
+                        stream.close()
+                    except (AttributeError, OSError):
+                        pass
+
+    def ask(self, request, saved_decks, cards, model=None):
         question = str(request.get("message") or "").strip()
         if not question or len(question) > 8000:
             raise ValueError("Enter a message of 1 to 8,000 characters.")
@@ -87,7 +170,7 @@ class CodexChat:
         prompt = "Instructions: {}\n\nUse this supplied application context:\n{}".format(
             instructions, json.dumps(context, ensure_ascii=False)
         )
-        return self._turn(instructions, prompt)
+        return self._turn(instructions, prompt, model=model)
 
     @staticmethod
     def is_deck_creation_request(request):
@@ -99,7 +182,7 @@ class CodexChat:
         new_deck = re.search(r"\bnew\s+(commander|pauper|standard)?\s*deck\b", message)
         return bool(has_deck and (create_verb or new_deck))
 
-    def create_deck(self, request, saved_decks, cards, architect, engine_cards):
+    def create_deck(self, request, saved_decks, cards, architect, engine_cards, model=None):
         """Ask Codex for a collection-only deck draft, validate it, and return it unsaved."""
         question = str(request.get("message") or "").strip()
         if not question or len(question) > 8000:
@@ -158,7 +241,7 @@ class CodexChat:
         prompt = "Instructions: {}\n\nDeck request and complete legal collection inventory:\n{}".format(
             instructions, json.dumps(context, ensure_ascii=False, separators=(",", ":"))
         )
-        draft = self._parse_deck_response(self._turn(instructions, prompt))
+        draft = self._parse_deck_response(self._turn(instructions, prompt, model=model))
         deck, plan = self._deck_from_plan(draft, format_name, by_candidate, saved_decks)
         validation = architect.validate_deck(deck, engine_cards, format_name)
         plan_errors = self._deck_plan_errors(plan, deck, cards)
@@ -167,7 +250,7 @@ class CodexChat:
                 prompt + "\n\nYour previous draft failed validation. Fix all listed errors using only available card names and obey every rule. "
                 "Return the complete corrected JSON object only.\nValidation errors: {}\nPrevious draft: {}"
             ).format(json.dumps(validation["errors"] + plan_errors, ensure_ascii=False), json.dumps(draft, ensure_ascii=False))
-            draft = self._parse_deck_response(self._turn(instructions, repair_prompt))
+            draft = self._parse_deck_response(self._turn(instructions, repair_prompt, model=model))
             deck, plan = self._deck_from_plan(draft, format_name, by_candidate, saved_decks)
             validation = architect.validate_deck(deck, engine_cards, format_name)
             plan_errors = self._deck_plan_errors(plan, deck, cards)
@@ -390,7 +473,7 @@ class CodexChat:
                 )})
         return selected
 
-    def _turn(self, instructions, prompt):
+    def _turn(self, instructions, prompt, model=None):
         env = os.environ.copy()
         env["CODEX_HOME"] = str(self.codex_home)
         proc = subprocess.Popen(
@@ -434,10 +517,13 @@ class CodexChat:
             }})
             response(1, deadline)
             send({"method": "initialized", "params": {}})
-            send({"id": 2, "method": "thread/start", "params": {
+            thread_params = {
                 "cwd": os.environ.get("MTG_CODEX_CWD", os.path.abspath(os.sep)),
                 "approvalPolicy": "never", "sandbox": "read-only",
-            }})
+            }
+            if model:
+                thread_params["model"] = str(model)
+            send({"id": 2, "method": "thread/start", "params": thread_params})
             started = response(2, deadline)
             thread_id = (started.get("thread") or {}).get("id")
             if not thread_id:

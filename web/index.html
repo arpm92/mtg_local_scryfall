@@ -88,6 +88,7 @@
               <button type="button" data-deck-view="list" aria-pressed="false">List</button>
             </div>
             <button id="new-deck" class="subtle-button" type="button">New</button>
+            <button id="simulate-deck" class="subtle-button" type="button" disabled>Run Forge simulation</button>
             <button id="save-deck" class="primary-button" type="button">Validate &amp; save</button>
           </div>
           <p id="deck-status" class="deck-status" role="status"></p>
@@ -110,12 +111,29 @@
       <section class="deck-chat" aria-labelledby="deck-chat-title">
         <div class="deck-chat-heading"><div><p class="eyebrow">Deck assistant</p><h1 id="deck-chat-title">Ask Codex about your cards</h1></div><span id="chat-connection" class="chat-connection">Checking connection…</span></div>
         <p class="chat-note">Ask about your collection or a saved deck, or request deck changes. Suggestions are not saved automatically; apply them in Decks and validate the deck.</p>
-        <label class="chat-deck-label">Discuss deck<select id="chat-deck"><option value="">Collection / general question</option></select></label>
+        <div class="chat-settings">
+          <label class="chat-deck-label">Discuss deck<select id="chat-deck"><option value="">Collection / general question</option></select></label>
+          <label class="chat-model-label">Codex model<select id="chat-model" aria-label="Codex model"><option value="">Codex default</option></select></label>
+        </div>
         <div id="chat-messages" class="chat-messages" role="log" aria-live="polite"><p class="muted">Choose a deck and ask a question. ChatGPT-plan credentials stay on the server.</p></div>
         <form id="chat-form" class="chat-form"><textarea id="chat-input" rows="2" maxlength="8000" placeholder="How can I improve this deck’s early game?" aria-label="Message Codex" disabled></textarea><button id="chat-send" class="primary-button" type="submit" disabled>Send</button></form>
       </section>
     </section>
   </main>
+
+  <dialog id="simulation-dialog" class="simulation-dialog">
+    <button id="close-simulation" class="dialog-close" type="button" aria-label="Close">×</button>
+    <form id="simulation-form" class="simulation-form">
+      <p class="eyebrow">MTG Forge</p>
+      <h2>Simulate this deck</h2>
+      <p id="simulation-help" class="muted"></p>
+      <div id="simulation-opponents" class="simulation-opponents"></div>
+      <label class="simulation-games-label">Games (1–10)<input id="simulation-games" type="number" min="1" max="10" value="10"></label>
+      <p id="simulation-status" class="simulation-status" role="status"></p>
+      <div id="simulation-results" class="simulation-results"></div>
+      <div class="import-actions"><button id="cancel-simulation" class="subtle-button" type="button">Close</button><button id="start-simulation" class="primary-button" type="submit">Start simulation</button></div>
+    </form>
+  </dialog>
 
   <dialog id="card-dialog">
     <button class="dialog-close" type="button" aria-label="Close">×</button>

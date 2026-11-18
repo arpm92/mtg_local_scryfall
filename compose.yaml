@@ -13,6 +13,7 @@ services:
       MTG_CODEX_TIMEOUT: ${MTG_CODEX_TIMEOUT:-240}
       CODEX_HOME: /codex
       MTG_CODEX_CWD: /tmp
+      MTG_FORGE_DIR: /opt/forge
     volumes:
       - type: bind
         source: ${MTG_PROJECT_PATH:?Set MTG_PROJECT_PATH}

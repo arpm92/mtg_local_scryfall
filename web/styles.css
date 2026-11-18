@@ -154,19 +154,55 @@ kbd { color: var(--muted); border: 1px solid var(--line); border-radius: 4px; pa
 .chat-connection { max-width: 45%; color: var(--muted); font-size: 12px; text-align: right; }
 .chat-connection.connected { color: #91d6a2; }
 .chat-note { color: var(--muted); font-size: 13px; }
-.chat-deck-label { display: grid; gap: 5px; width: min(100%, 360px); color: var(--muted); font-size: 12px; }
-.chat-deck-label select, .chat-form textarea { padding: 10px; color: var(--text); background: var(--surface-2); border: 1px solid var(--line); border-radius: 7px; font: inherit; }
+.chat-settings { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
+.chat-deck-label, .chat-model-label { display: grid; gap: 5px; color: var(--muted); font-size: 12px; }
+.chat-deck-label { width: min(100%, 360px); }
+.chat-model-label { width: min(100%, 260px); }
+.chat-deck-label select, .chat-model-label select, .chat-form textarea { padding: 10px; color: var(--text); background: var(--surface-2); border: 1px solid var(--line); border-radius: 7px; font: inherit; }
 .chat-messages { display: grid; gap: 10px; min-height: 120px; max-height: 420px; margin: 12px 0; padding: 12px; overflow: auto; background: #0d0f12; border: 1px solid var(--line); border-radius: 8px; }
 .chat-message { max-width: 90%; padding: 10px 12px; background: var(--surface-2); border-radius: 9px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .chat-message.user { justify-self: end; background: #343020; }
 .chat-message strong { color: var(--accent); font-size: 11px; }
-.chat-message p { margin: 5px 0 0; }
+.chat-message-body { margin-top: 5px; white-space: normal; line-height: 1.5; }
+.chat-message-body > :first-child { margin-top: 0; }
+.chat-message-body > :last-child { margin-bottom: 0; }
+.chat-message-body p, .chat-message-body ul, .chat-message-body ol, .chat-message-body blockquote, .chat-message-body pre { margin: 8px 0; }
+.chat-message-body ul, .chat-message-body ol { padding-left: 23px; }
+.chat-message-body li + li { margin-top: 3px; }
+.chat-message-body h1, .chat-message-body h2, .chat-message-body h3, .chat-message-body h4 { margin: 14px 0 6px; color: var(--accent-2); line-height: 1.25; }
+.chat-message-body h1 { font-size: 1.35rem; }.chat-message-body h2 { font-size: 1.2rem; }.chat-message-body h3 { font-size: 1.08rem; }
+.chat-message-body blockquote { padding: 4px 10px; color: var(--muted); border-left: 3px solid var(--accent); }
+.chat-message-body pre { max-width: 100%; padding: 10px; overflow: auto; background: #0b0d10; border: 1px solid var(--line); border-radius: 6px; white-space: pre; }
+.chat-message-body code { padding: 1px 4px; background: #0b0d10; border-radius: 4px; font: .92em Consolas,monospace; }
+.chat-message-body pre code { padding: 0; background: transparent; }
+.chat-message-body a { color: #9ac5f6; text-decoration: underline; text-underline-offset: 2px; }
+.chat-table-wrap { max-width: 100%; overflow-x: auto; }
+.chat-message-body table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.chat-message-body th, .chat-message-body td { padding: 6px 8px; border: 1px solid var(--line); text-align: left; vertical-align: top; }
+.chat-message-body th { background: #24272c; }
 .chat-form { display: grid; grid-template-columns: 1fr auto; gap: 9px; align-items: end; }
 .chat-form textarea { resize: vertical; min-height: 52px; }
-.chat-form button:disabled { opacity: .6; cursor: wait; }
+.chat-form button:disabled, #simulate-deck:disabled { opacity: .55; cursor: not-allowed; }
+.simulation-dialog { max-width: 660px; }
+.simulation-form { display: grid; gap: 10px; padding: 24px; }
+.simulation-form h2 { margin: 0; font: 700 26px Georgia,serif; }
+.simulation-form > p { margin: 0; }
+.simulation-opponents { max-height: 260px; overflow: auto; }
+.simulation-opponent-list { display: grid; gap: 6px; }
+.simulation-opponent { display: flex; align-items: center; gap: 10px; padding: 9px 10px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 7px; cursor: pointer; }
+.simulation-opponent span { display: grid; gap: 2px; }
+.simulation-opponent small { color: var(--muted); }
+.simulation-games-label { display: grid; gap: 5px; width: min(100%, 180px); color: var(--muted); font-size: 12px; }
+.simulation-games-label input { padding: 9px; color: var(--text); background: var(--surface-2); border: 1px solid var(--line); border-radius: 6px; font: inherit; }
+.simulation-status { min-height: 20px; color: var(--muted); }
+.simulation-status.error { color: var(--danger); }.simulation-status.success { color: #83dfa1; }
+.simulation-results { max-height: 240px; overflow: auto; overflow-wrap: anywhere; }
+.simulation-results h3 { margin: 5px 0; font-size: 14px; }
+.simulation-results ul { margin: 4px 0; padding-left: 20px; }
+.simulation-results code { white-space: pre-wrap; }
 @media (max-width: 1000px) { .deck-builder { grid-template-columns: 1fr; } .deck-library { display: none; } .deck-workspace { grid-template-columns: 1fr; } .deck-toolbar { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 600px) { .deck-visual-grid { grid-template-columns: repeat(3, minmax(0,1fr)); gap: 10px 6px; } .deck-card-actions { opacity: 1; bottom: 23px; } .deck-card-actions button { width: 26px; height: 26px; } }
-@media (max-width: 600px) { .deck-chat-heading { align-items: flex-start; flex-direction: column; } .chat-connection { max-width: 100%; text-align: left; } .chat-message { max-width: 100%; } .chat-form { grid-template-columns: 1fr; } .chat-form button { justify-self: end; } }
+@media (max-width: 600px) { .deck-chat-heading { align-items: flex-start; flex-direction: column; } .chat-connection { max-width: 100%; text-align: left; } .chat-message { max-width: 100%; } .chat-form { grid-template-columns: 1fr; } .chat-form button { justify-self: end; } .simulation-form { padding: 18px; } }
 
 dialog { width: min(850px, calc(100% - 30px)); padding: 0; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 25px 90px #000d; }
 dialog::backdrop { background: #050608d9; backdrop-filter: blur(4px); }

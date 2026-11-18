@@ -439,6 +439,9 @@ def run_forge_simulation(deck_paths, format_name, forge_dir=DEFAULT_FORGE, games
     forge_dir = Path(forge_dir)
     jar = forge_dir / FORGE_JAR
     if not jar.is_file():
+        candidates = sorted(forge_dir.glob("forge-gui-desktop-*-jar-with-dependencies.jar"))
+        jar = candidates[0] if len(candidates) == 1 else jar
+    if not jar.is_file():
         return {"status": "unsupported", "reason": "Forge JAR not found: {}".format(jar), "command": []}
     deck_paths = [Path(path).resolve() for path in deck_paths]
     required = config["simulation"]["players"]

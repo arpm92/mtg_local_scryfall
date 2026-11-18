@@ -1,4 +1,4 @@
-const state = { all: [], filtered: [], visible: 60, formats: {}, savedDecks: [], chatMessages: [], chatAvailable: false, deckView: 'grid', deckInfo: null, reservationDeck: null, deck: {main: {}, sideboard: {}, commanders: {}} };
+const state = { all: [], filtered: [], visible: 60, formats: {}, savedDecks: [], chatMessages: [], chatAvailable: false, chatModelsLoaded: false, deckView: 'grid', deckInfo: null, reservationDeck: null, deck: {main: {}, sideboard: {}, commanders: {}} };
 const $ = (selector) => document.querySelector(selector);
 const grid = $('#card-grid');
 const search = $('#search');
@@ -332,6 +332,7 @@ function renderDeckBuilder() {
   const format = $('#deck-format').value; const scanned = format === 'scanned';
   const config = state.formats[format] || {main_size: 0, sideboard_target: 0, commander_min: 0};
   $('#deck-name').readOnly = scanned; $('#deck-format').disabled = scanned; $('#save-deck').disabled = scanned;
+  $('#simulate-deck').disabled = !state.deckInfo || scanned || !state.simulationAvailable;
   document.querySelector('.available-cards').hidden = scanned;
   $('#commander-section').hidden = format !== 'commander'; $('#sideboard-section').hidden = format === 'commander' || scanned;
   if (scanned) $('#deck-status').textContent = 'Scanned deck · unclassified · card copies reserved in your collection.';
@@ -403,13 +404,151 @@ $('.deck-list-panel').addEventListener('click', event => { const add = event.tar
 $('#decks-view').addEventListener('click', event => { const preview = event.target.closest('[data-preview-index]'); if (preview) openCard(Number(preview.dataset.previewIndex)); });
 document.querySelectorAll('[data-deck-view]').forEach(button => button.addEventListener('click', () => { state.deckView = button.dataset.deckView; document.querySelectorAll('[data-deck-view]').forEach(item => { const active = item === button; item.classList.toggle('active', active); item.setAttribute('aria-pressed', String(active)); }); renderDeckBuilder(); }));
 $('#deck-search').addEventListener('input', renderDeckBuilder); $('#deck-format').addEventListener('change', newDeck); $('#new-deck').addEventListener('click', newDeck); $('#save-deck').addEventListener('click', saveDeck);
+
+const simulationDialog = $('#simulation-dialog');
+function updateSimulationStart() {
+  const required = Number(simulationDialog.dataset.required || 0);
+  const selected = $('#simulation-opponents').querySelectorAll('input[type="checkbox"]:checked').length;
+  $('#start-simulation').disabled = !state.simulationAvailable || selected !== required;
+}
+function openSimulationDialog() {
+  const deck = state.deckInfo;
+  if (!deck || deck.format === 'scanned') return;
+  const formatConfig = state.simulationFormats?.[deck.format];
+  const required = Number(formatConfig?.opponents || 0);
+  simulationDialog.dataset.required = String(required);
+  $('#simulation-games').value = '10';
+  $('#simulation-status').textContent = '';
+  $('#simulation-results').innerHTML = '';
+  $('#start-simulation').textContent = 'Start simulation';
+  const choices = state.savedDecks.filter(item => item.format === deck.format && item.name !== deck.name);
+  $('#simulation-help').textContent = deck.format === 'commander'
+    ? `Forge will play a four-player Commander game with ${required} other saved Commander decks. Choose exactly ${required} opponents. Results are preliminary AI evidence.`
+    : `Forge will play 1v1 ${deck.format[0].toUpperCase() + deck.format.slice(1)} games. Choose one saved ${deck.format} opponent. Forge does not enforce that format’s legality; decks are checked by the app first.`;
+  const rows = choices.map(item => `<label class="simulation-opponent"><input type="checkbox" value="${escapeHtml(item.name)}"><span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.archetype || item.format)}</small></span></label>`).join('');
+  const shortage = choices.length < required ? `<p class="availability-warning">This format needs ${required} saved opponent deck${required === 1 ? '' : 's'}; only ${choices.length} are available.</p>` : '';
+  $('#simulation-opponents').innerHTML = choices.length ? `${shortage}<div class="simulation-opponent-list">${rows}</div>` : `${shortage}<p class="muted">No saved opponent decks in this format.</p>`;
+  $('#simulation-opponents').querySelectorAll('input[type="checkbox"]').forEach(box => box.addEventListener('change', () => {
+    const checked = [...$('#simulation-opponents').querySelectorAll('input[type="checkbox"]:checked')];
+    if (checked.length > required) box.checked = false;
+    updateSimulationStart();
+  }));
+  updateSimulationStart();
+  simulationDialog.showModal();
+}
+function showSimulationJob(job) {
+  const complete = ['completed','partial','failed','timeout','interrupted'].includes(job.status);
+  $('#simulation-status').className = `simulation-status ${complete && job.status !== 'completed' ? 'error' : complete ? 'success' : ''}`;
+  if (job.status === 'queued' || job.status === 'running') {
+    $('#simulation-status').textContent = job.status === 'queued' ? 'Simulation queued…' : `Forge is running (${job.completed_games || 0}/${job.games_requested} games reported)…`;
+    $('#start-simulation').disabled = true; $('#start-simulation').textContent = 'Running…';
+    return false;
+  }
+  $('#start-simulation').disabled = false; $('#start-simulation').textContent = 'Run again';
+  $('#simulation-status').textContent = job.status === 'completed'
+    ? `Completed ${job.completed_games} of ${job.games_requested} requested games. Forge results are preliminary AI evidence.`
+    : `${job.message || `Simulation ${job.status}.`} Completed ${job.completed_games || 0} of ${job.games_requested} games.`;
+  const results = (job.game_results || []).slice(0, 20);
+  $('#simulation-results').innerHTML = `${results.length ? `<h3>Forge result lines</h3><ul>${results.map(line => `<li><code>${escapeHtml(line)}</code></li>`).join('')}</ul>` : ''}<p class="muted">Evidence saved under <code>outputs/${escapeHtml(job.output_directory || '')}</code>${job.stdout_log ? ` · Logs: <code>${escapeHtml(job.stdout_log)}</code> and <code>${escapeHtml(job.stderr_log)}</code>` : ''}</p>`;
+  return true;
+}
+async function startSimulation(event) {
+  event.preventDefault();
+  const deck = state.deckInfo; if (!deck) return;
+  const checked = [...$('#simulation-opponents').querySelectorAll('input[type="checkbox"]:checked')];
+  const opponents = checked.map(item => item.value);
+  const status = $('#simulation-status'); status.className = 'simulation-status'; status.textContent = 'Starting Forge…';
+  $('#start-simulation').disabled = true;
+  try {
+    const response = await fetch('/api/simulations', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({deckName:deck.name,format:deck.format,opponents,games:Number($('#simulation-games').value)})});
+    let job = await response.json();
+    if (!response.ok) throw new Error(job.error || `Server returned ${response.status}`);
+    showSimulationJob(job);
+    while (['queued','running'].includes(job.status)) {
+      await new Promise(resolve => setTimeout(resolve, 2500));
+      const result = await fetch(`/api/simulations/${encodeURIComponent(job.id)}`, {cache:'no-store'});
+      job = await result.json();
+      if (!result.ok) throw new Error(job.error || 'Could not read simulation status.');
+      showSimulationJob(job);
+    }
+  } catch (error) {
+    status.className = 'simulation-status error'; status.textContent = error.message;
+    $('#start-simulation').disabled = false; $('#start-simulation').textContent = 'Start simulation';
+  }
+}
+$('#simulate-deck').addEventListener('click', openSimulationDialog);
+$('#close-simulation').addEventListener('click', () => simulationDialog.close());
+$('#cancel-simulation').addEventListener('click', () => simulationDialog.close());
+$('#simulation-form').addEventListener('submit', startSimulation);
 $('#saved-decks').addEventListener('click', event => { const remove = event.target.closest('[data-delete-deck]'); const button = event.target.closest('[data-saved]'); if (remove) deleteDeck(Number(remove.dataset.deleteDeck)); else if (button) loadSavedDeck(state.savedDecks[Number(button.dataset.saved)]); });
 function renderChat() {
   const log = $('#chat-messages');
-  log.innerHTML = state.chatMessages.map(item => `<div class="chat-message ${item.role === 'user' ? 'user' : 'assistant'}"><strong>${item.role === 'user' ? 'You' : 'Codex'}</strong><p></p></div>`).join('');
-  [...log.querySelectorAll('.chat-message p')].forEach((node, index) => { node.textContent = state.chatMessages[index].content; });
+  log.innerHTML = state.chatMessages.map(item => `<article class="chat-message ${item.role === 'user' ? 'user' : 'assistant'}"><strong>${item.role === 'user' ? 'You' : 'Codex'}</strong><div class="chat-message-body">${item.role === 'assistant' ? renderMarkdown(item.content) : `<p>${escapeHtml(item.content).replace(/\n/g, '<br>')}</p>`}</div></article>`).join('');
   log.scrollTop = log.scrollHeight;
 }
+function inlineMarkdown(value) {
+  const protectedHtml = [];
+  let text = escapeHtml(value).replace(/`([^`]+)`/g, (_, code) => {
+    const index = protectedHtml.push(`<code>${code}</code>`) - 1;
+    return `\u0000${index}\u0000`;
+  });
+  text = text.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/gi, (match, label, href) => {
+    const url = href.replace(/&amp;/g, '&');
+    try {
+      const parsed = new URL(url);
+      if (!['http:', 'https:'].includes(parsed.protocol)) return label;
+      return `<a href="${escapeHtml(parsed.href)}" target="_blank" rel="noopener noreferrer">${label}</a>`;
+    } catch { return label; }
+  });
+  text = text.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/__([^_\n]+)__/g, '<strong>$1</strong>')
+    .replace(/~~([^~\n]+)~~/g, '<del>$1</del>')
+    .replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>')
+    .replace(/(^|[^_])_([^_\n]+)_/g, '$1<em>$2</em>');
+  return text.replace(/\u0000(\d+)\u0000/g, (_, index) => protectedHtml[Number(index)] || '');
+}
+function renderMarkdown(markdown) {
+  const lines = String(markdown ?? '').replace(/\r\n?/g, '\n').split('\n');
+  const blocks = []; let paragraph = []; let list = null;
+  const flushParagraph = () => { if (paragraph.length) { blocks.push(`<p>${paragraph.map(inlineMarkdown).join('<br>')}</p>`); paragraph = []; } };
+  const flushList = () => { if (list) { blocks.push(`<${list.type}>${list.items.map(item => `<li>${inlineMarkdown(item)}</li>`).join('')}</${list.type}>`); list = null; } };
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i]; const trimmed = line.trim();
+    if (!trimmed) { flushParagraph(); flushList(); continue; }
+    if (/^```/.test(trimmed)) {
+      flushParagraph(); flushList(); const code = []; const language = trimmed.slice(3).trim();
+      while (++i < lines.length && !/^\s*```/.test(lines[i])) code.push(lines[i]);
+      blocks.push(`<pre><code${language ? ` class="language-${escapeHtml(language)}"` : ''}>${escapeHtml(code.join('\n'))}</code></pre>`); continue;
+    }
+    if (i + 1 < lines.length && trimmed.includes('|') && /^\s*\|?\s*:?-{3,}/.test(lines[i + 1])) {
+      flushParagraph(); flushList();
+      const cells = value => value.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(cell => cell.trim());
+      const headings = cells(trimmed); i += 2; const rows = [];
+      while (i < lines.length && lines[i].trim().includes('|')) { rows.push(cells(lines[i])); i += 1; }
+      i -= 1;
+      blocks.push(`<div class="chat-table-wrap"><table><thead><tr>${headings.map(cell => `<th>${inlineMarkdown(cell)}</th>`).join('')}</tr></thead><tbody>${rows.map(row => `<tr>${headings.map((_, index) => `<td>${inlineMarkdown(row[index] || '')}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`); continue;
+    }
+    const heading = trimmed.match(/^(#{1,6})\s+(.+)$/);
+    if (heading) { flushParagraph(); flushList(); const level = heading[1].length; blocks.push(`<h${level}>${inlineMarkdown(heading[2])}</h${level}>`); continue; }
+    if (/^(?:-{3,}|\*{3,}|_{3,})$/.test(trimmed)) { flushParagraph(); flushList(); blocks.push('<hr>'); continue; }
+    if (/^>\s?/.test(trimmed)) { flushParagraph(); flushList(); const quote = []; while (i < lines.length && /^\s*>/.test(lines[i])) quote.push(lines[i++].replace(/^\s*>\s?/, '')); i -= 1; blocks.push(`<blockquote>${quote.map(inlineMarkdown).join('<br>')}</blockquote>`); continue; }
+    const unordered = trimmed.match(/^[-+*]\s+(.+)$/); const ordered = trimmed.match(/^\d+[.)]\s+(.+)$/);
+    if (unordered || ordered) { flushParagraph(); const type = ordered ? 'ol' : 'ul'; if (list && list.type !== type) flushList(); if (!list) list = {type, items: []}; list.items.push((unordered || ordered)[1]); continue; }
+    flushList(); paragraph.push(trimmed);
+  }
+  flushParagraph(); flushList();
+  return blocks.join('');
+}
+async function loadChatModels() {
+  const response = await fetch('/api/chat/models', {cache: 'no-store'});
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || 'Could not load Codex models.');
+  const select = $('#chat-model'); const saved = localStorage.getItem('mtg-chat-model') || '';
+  select.innerHTML = '<option value="">Codex default</option>' + (data.models || []).map(model => `<option value="${escapeHtml(model.id)}">${escapeHtml(model.name)}${model.isDefault ? ' · default' : ''}</option>`).join('');
+  if ((data.models || []).some(model => model.id === saved)) select.value = saved;
+  state.chatModelsLoaded = true;
+}
+$('#chat-model').addEventListener('change', () => localStorage.setItem('mtg-chat-model', $('#chat-model').value));
 async function refreshChatStatus() {
   try {
     const response = await fetch('/api/chat/status', {cache: 'no-store'});
@@ -417,13 +556,19 @@ async function refreshChatStatus() {
     state.chatAvailable = Boolean(result.available);
     $('#chat-input').disabled = !state.chatAvailable;
     $('#chat-send').disabled = !state.chatAvailable;
+    $('#chat-model').disabled = !state.chatAvailable;
     $('#chat-connection').textContent = state.chatAvailable ? 'Connected' : result.message;
     $('#chat-connection').classList.toggle('connected', state.chatAvailable);
+    if (state.chatAvailable && !state.chatModelsLoaded) {
+      try { await loadChatModels(); }
+      catch { $('#chat-model').innerHTML = '<option value="">Codex default (model list unavailable)</option>'; state.chatModelsLoaded = true; }
+    }
     if (!state.chatAvailable) $('#chat-messages').innerHTML = `<p class="muted">${escapeHtml(result.message)} The chat is prepared but needs the server-side Codex app-server and ChatGPT-plan credentials.</p>`;
   } catch {
     state.chatAvailable = false;
     $('#chat-input').disabled = true;
     $('#chat-send').disabled = true;
+    $('#chat-model').disabled = true;
     $('#chat-connection').textContent = 'Unavailable; retrying';
   }
 }
@@ -437,12 +582,17 @@ $('#chat-form').addEventListener('submit', async event => {
   input.value = ''; renderChat();
   const send = $('#chat-send'); send.disabled = true; send.textContent = 'Thinking…';
   try {
-    const response = await fetch('/api/chat', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({message, history: state.chatMessages.slice(0, -1), deckName: $('#chat-deck').value})});
+    const response = await fetch('/api/chat', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({message, history: state.chatMessages.slice(0, -1), deckName: $('#chat-deck').value, model: $('#chat-model').value})});
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || `Server returned ${response.status}`);
     if (result.deck) {
       await reloadCollection();
       state.savedDecks = await fetch('/api/decks', {cache: 'no-store'}).then(r => r.json());
+      state.deckInfo = result.deck;
+      state.reservationDeck = {name: result.deck.name, format: result.deck.format};
+      state.deck = {main:{...result.deck.main},sideboard:{...(result.deck.sideboard || {})},commanders:{...(result.deck.commanders || {})}};
+      $('#deck-name').value = result.deck.name;
+      $('#deck-format').value = result.deck.format;
       renderSavedDecks();
       renderDeckBuilder();
       $('#chat-deck').value = result.deck.name;
@@ -452,4 +602,4 @@ $('#chat-form').addEventListener('submit', async event => {
     state.chatMessages.push({role: 'assistant', content: `I couldn't complete that request: ${error.message}`}); renderChat();
   } finally { send.disabled = false; send.textContent = 'Send'; input.focus(); }
 });
-Promise.all([fetch('/api/formats').then(r => r.json()), fetch('/api/decks').then(r => r.json())]).then(([formats, decks]) => { state.formats = formats; state.savedDecks = decks; renderSavedDecks(); renderDeckBuilder(); }).catch(error => { $('#deck-status').textContent = `Deck builder unavailable: ${error.message}`; });
+Promise.all([fetch('/api/formats').then(r => r.json()), fetch('/api/decks').then(r => r.json()), fetch('/api/simulations/config').then(r => r.json())]).then(([formats, decks, simulations]) => { state.formats = formats; state.savedDecks = decks; state.simulationAvailable = Boolean(simulations.available); state.simulationFormats = simulations.formats || {}; renderSavedDecks(); renderDeckBuilder(); if (!state.simulationAvailable) $('#simulate-deck').title = 'Forge runtime or installation is unavailable on the server.'; }).catch(error => { $('#deck-status').textContent = `Deck builder unavailable: ${error.message}`; });

@@ -6,11 +6,11 @@ This stack packages the collection and deck builder, and installs Codex CLI for 
 
 1. Put a checkout of this repository on the home server (for example, `E:\repos\mtg`). Keep the collection, `.scryfall_cache`, `outputs`, and `.codex-home` on that host so Docker can bind-mount them.
 2. Copy `.env.portainer.example` to a server-local `.env.portainer`. Set the Windows paths and the server's LAN address. If using Portainer's Git stack, enter the same values under **Environment variables**.
-3. Confirm the enriched CSV and `.scryfall_cache\oracle_cards.jsonl.gz` exist, and that `outputs\commander`, `outputs\pauper`, `outputs\standard`, and `.codex-home` are writable by Docker Desktop. Create the Codex data directory before deploying: `New-Item -ItemType Directory -Force .codex-home`.
+3. Confirm the enriched CSV and `.scryfall_cache\oracle_cards.jsonl.gz` exist and that `outputs\commander`, `outputs\pauper`, `outputs\standard`, and `.codex-home` are writable by Docker Desktop. Create the Codex data directory before deploying: `New-Item -ItemType Directory -Force .codex-home`.
 
 ## Deploy in Portainer
 
-Create a Stack using this repository's Git URL and `compose.yaml`, or run `docker compose --env-file .env.portainer up -d --build` from the checkout on the server. Portainer builds the image and starts the container. The app prompts for its configured login. The default URL for the documented server is `http://192.168.50.102:8015/`.
+Create a Stack using this repository's Git URL and `compose.yaml`, or run `docker compose --env-file .env.portainer up -d --build` from the checkout on the server. Portainer builds the image and starts the container. The internal web app has no login. The default URL for the documented server is `http://192.168.50.102:8015/`.
 
 To update the app, pull/redeploy the stack with **Re-pull image and redeploy** enabled. Collection updates are separate: refresh/enrich the CSV on the host, then restart the stack if the CSV changed.
 
@@ -26,4 +26,4 @@ OpenAI documents ChatGPT-plan use through Codex app-server as a preview. A remot
 
 ## Forge
 
-Forge is not included in this container. The current Forge runner expects the Windows installation and Java on the host. The server has enough CPU/RAM to try one headless simulation at a time, but it shares 16 GB RAM with Windows and existing containers. Start with the existing 2 GB Forge heap, monitor host memory and CPU, and avoid running Forge games concurrently with other heavy services. Multi-player Commander performance still needs measurement on the server.
+The image installs OpenJDK 17 and downloads Forge 2.0.16 from the official release with a pinned SHA-256 digest. Use **Decks → Run Forge simulation** after selecting a saved deck. Choose one same-format opponent for Pauper/Standard or three for four-player Commander. The runner validates each list independently, defaults to 10 games, rotates the seat order, and saves a manifest plus stdout/stderr logs beneath `outputs/<format>/simulations/`. It runs only one simulation job at a time with a 2 GB Java heap. Standard and Pauper simulations are 1v1 games, not BO3 sideboard tests; Forge does not enforce those formats' bans or rotation.
