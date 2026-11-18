@@ -1,0 +1,13 @@
+.codex-home/*
+.codex-home/.*
+.env.portainer
+.venv/
+.scryfall_cache/
+.secrets/
+__pycache__/
+*.py[cod]
+.playwright-cli/
+outputs/
+collection_export_*.csv
+MTG_Collection*.csv
+SESSION_HANDOFF.md

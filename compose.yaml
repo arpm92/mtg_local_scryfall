@@ -1,0 +1,40 @@
+services:
+  mtg-collection:
+    build: .
+    image: local/mtg-collection:latest
+    container_name: mtg-collection
+    restart: unless-stopped
+    init: true
+    ports:
+      - "${MTG_BIND_ADDRESS:?Set MTG_BIND_ADDRESS}:${MTG_PORT:-8015}:8000"
+    environment:
+      MTG_CODEX_ENABLED: ${MTG_CODEX_ENABLED:-true}
+      MTG_CODEX_COMMAND: codex
+      MTG_CODEX_TIMEOUT: ${MTG_CODEX_TIMEOUT:-240}
+      CODEX_HOME: /codex
+      MTG_CODEX_CWD: /tmp
+    volumes:
+      - type: bind
+        source: ${MTG_PROJECT_PATH:?Set MTG_PROJECT_PATH}
+        target: /app/MTG_Collection_Enriched.csv
+        read_only: true
+      - type: bind
+        source: ${MTG_CACHE_PATH:?Set MTG_CACHE_PATH}
+        target: /app/.scryfall_cache
+        read_only: true
+      - type: bind
+        source: ${MTG_OUTPUT_PATH:?Set MTG_OUTPUT_PATH}
+        target: /app/outputs
+      - type: bind
+        source: ${MTG_CODEX_HOME_PATH:?Set MTG_CODEX_HOME_PATH}
+        target: /codex
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

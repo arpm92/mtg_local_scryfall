@@ -1,0 +1,90 @@
+import importlib.util
+import json
+import tempfile
+import unittest
+from pathlib import Path
+
+
+ENGINE_PATH = Path(__file__).resolve().parents[1] / ".agents" / "skills" / "mtg-deck-architect" / "scripts" / "architect.py"
+SPEC = importlib.util.spec_from_file_location("deck_architect_engine", ENGINE_PATH)
+engine = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(engine)
+
+
+def make_card(name, quantity=4, legal=True, colors=None, type_line="Creature — Test", text="", mv=2):
+    colors = colors or []
+    return {
+        "name": name, "oracle_id": name.lower(), "quantity": quantity,
+        "type_line": type_line, "oracle_text": text, "mana_cost": "", "mana_value": mv,
+        "colors": colors, "color_identity": colors, "keywords": [], "produced_mana": [],
+        "legalities": {key: "legal" if legal else "not_legal" for key in ("commander", "pauper", "standard")},
+        "layout": "normal", "power": "2", "toughness": "2", "rarity": "common",
+        "printings": [{"set": "TST", "collector": "1", "quantity": quantity}],
+    }
+
+
+class DeckArchitectTests(unittest.TestCase):
+    def test_configs_load_independently(self):
+        self.assertEqual(engine.load_format("commander")["total_size"], 100)
+        self.assertEqual(engine.load_format("pauper")["legality_field"], "pauper")
+        self.assertEqual(engine.load_format("standard")["simulation"]["forge_game_type"], "constructed")
+
+    def test_pauper_uses_legality_not_owned_rarity(self):
+        card = make_card("Common Somewhere")
+        card["rarity"] = "rare"
+        self.assertTrue(engine.is_legal(card, engine.load_format("pauper")))
+
+    def test_sixty_card_validation_enforces_combined_copy_limit_and_ownership(self):
+        cards = [make_card("Spell", quantity=3), make_card("Island", quantity=1, type_line="Basic Land — Island")]
+        deck = {"format": "pauper", "main": {"Spell": 4, "Island": 56}, "sideboard": {"Spell": 1}, "commanders": {}}
+        result = engine.validate_deck(deck, cards, respect_ownership=True)
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("limit is 4" in error for error in result["errors"]))
+        self.assertTrue(any("only 3 are owned" in error for error in result["errors"]))
+
+    def test_commander_color_identity_and_size(self):
+        commander = make_card("Blue Leader", quantity=1, colors=["U"], type_line="Legendary Creature — Wizard")
+        red = make_card("Red Spell", quantity=1, colors=["R"], type_line="Instant")
+        island = make_card("Island", quantity=1, type_line="Basic Land — Island")
+        deck = {"format": "commander", "main": {"Island": 98, "Red Spell": 1}, "sideboard": {}, "commanders": {"Blue Leader": 1}}
+        result = engine.validate_deck(deck, [commander, red, island])
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("outside commander identity" in error for error in result["errors"]))
+
+    def test_forge_export_sections(self):
+        cards = [make_card("Spell"), make_card("Island", type_line="Basic Land — Island")]
+        deck = {"name": "Test", "format": "standard", "main": {"Spell": 4, "Island": 56},
+                "sideboard": {"Spell": 1}, "commanders": {}}
+        with tempfile.TemporaryDirectory() as temp:
+            path = engine.export_forge(deck, Path(temp) / "test.dck", cards)
+            text = path.read_text(encoding="utf-8")
+        self.assertIn("[Main]", text)
+        self.assertIn("[Sideboard]", text)
+
+    def test_forge_runner_refuses_wrong_player_count_before_launch(self):
+        value = engine.run_forge_simulation(["one.dck"], "pauper")
+        self.assertEqual(value["status"], "unsupported")
+        self.assertIn("requires 2", value["reason"])
+
+    def test_commander_bracket_counts_game_changers_conservatively(self):
+        with tempfile.TemporaryDirectory() as temp:
+            lists = Path(temp) / "res" / "lists"
+            lists.mkdir(parents=True)
+            (lists / "gamechangers.txt").write_text("Power Card\n", encoding="utf-8")
+            deck = {"main": {"Power Card": 1}, "commanders": {"Leader": 1}}
+            result = engine.classify_commander_bracket(deck, temp)
+        self.assertEqual(result["advisory_bracket"], 3)
+        self.assertEqual(result["game_changers"], ["power card"])
+
+    def test_optimizer_preserves_parent_and_validation(self):
+        cards = [make_card("Spell", quantity=4), make_card("Island", type_line="Basic Land â€” Island")]
+        deck = {"name": "Original", "format": "standard", "main": {"Spell": 4, "Island": 56},
+                "sideboard": {}, "commanders": {}, "colors": ["U"]}
+        value = engine.optimize_deck(deck, cards)
+        self.assertEqual(value["parent"], "Original")
+        self.assertTrue(value["validation"]["valid"])
+        self.assertEqual(value["main"], deck["main"])
+
+
+if __name__ == "__main__":
+    unittest.main()

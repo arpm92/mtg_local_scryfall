@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#171a1f">
+  <title>My MTG Collection</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="/" aria-label="My MTG Collection home">
+      <span class="brand-mark" aria-hidden="true">✦</span>
+      <span><strong>My Collection</strong><small id="source-name">Loading CSV…</small></span>
+    </a>
+    <nav class="primary-tabs" aria-label="Main sections">
+      <button class="tab-button active" type="button" data-tab="collection" aria-selected="true">Collection</button>
+      <button class="tab-button" type="button" data-tab="decks" aria-selected="false">Decks</button>
+      <button class="tab-button" type="button" data-tab="chat" aria-selected="false">Chat</button>
+    </nav>
+    <div id="header-stats" class="header-stats" aria-live="polite">
+      <span><strong id="result-count">—</strong> cards</span>
+      <span><strong id="copy-count">—</strong> copies</span>
+    </div>
+  </header>
+
+  <main>
+    <section id="collection-view" class="tab-view">
+      <section class="search-panel" aria-label="Collection search">
+      <div class="search-row">
+        <label class="search-box">
+          <span class="sr-only">Search collection</span>
+          <span aria-hidden="true">⌕</span>
+          <input id="search" type="search" autocomplete="off" spellcheck="false"
+                 placeholder='Search cards or try t:creature c:u mv<=3'>
+          <kbd>/</kbd>
+        </label>
+        <button id="clear" class="subtle-button" type="button">Clear</button>
+      </div>
+
+      <div class="filters">
+        <label>Color<select id="color-filter"><option value="">Any color</option></select></label>
+        <label>Type<select id="type-filter"><option value="">Any type</option></select></label>
+        <label>Set<select id="set-filter"><option value="">Any set</option></select></label>
+        <label>Rarity<select id="rarity-filter"><option value="">Any rarity</option></select></label>
+        <label>Finish<select id="foil-filter"><option value="">Any finish</option></select></label>
+        <label>Sort<select id="sort">
+          <option value="name">Name</option>
+          <option value="mv">Mana value</option>
+          <option value="quantity">Quantity</option>
+          <option value="set">Set</option>
+          <option value="original">CSV order</option>
+        </select></label>
+      </div>
+
+      <details class="syntax-help">
+        <summary>Search syntax</summary>
+        <div>
+          <code>t:creature</code><code>o:"draw a card"</code><code>c:u</code>
+          <code>id:ur</code><code>mv&lt;=3</code><code>set:mh3</code>
+          <code>rarity:rare</code><code>is:foil</code><code>qty&gt;1</code><code>-c:r</code>
+        </div>
+        <p>Fields: <b>name/n</b>, <b>type/t</b>, <b>oracle/o</b>, <b>color/c</b>, <b>identity/id</b>, <b>mv/cmc</b>, <b>set/s</b>, <b>rarity/r</b>, <b>keyword/kw</b>, <b>language/lang</b>, <b>produces</b>, <b>quantity/qty</b>, and <b>is</b>.</p>
+      </details>
+      <p id="query-error" class="query-error" role="status"></p>
+      </section>
+
+      <div id="loading" class="state-message">Reading your collection…</div>
+      <section id="card-grid" class="card-grid" aria-label="Cards"></section>
+      <div id="empty" class="state-message" hidden>No cards match those filters.</div>
+      <button id="show-more" class="show-more" type="button" hidden>Show more</button>
+    </section>
+
+    <section id="decks-view" class="tab-view" hidden>
+      <div class="decks-heading">
+        <div><p class="eyebrow">Deck architect</p><h1>Build from your collection</h1></div>
+        <span id="deck-count" class="deck-count">0 saved decks</span>
+      </div>
+      <div class="deck-builder">
+        <aside class="deck-library"><h2>Saved decks</h2><div id="saved-decks"><p class="muted">No saved decks yet.</p></div></aside>
+        <section class="deck-editor">
+          <div class="deck-toolbar">
+            <label>Name<input id="deck-name" value="New Deck" maxlength="100"></label>
+            <label>Format<select id="deck-format"><option value="commander">Commander</option><option value="pauper">Pauper</option><option value="standard">Standard</option></select></label>
+            <div class="deck-view-switch" aria-label="Deck display">
+              <button class="active" type="button" data-deck-view="grid" aria-pressed="true">Cards</button>
+              <button type="button" data-deck-view="list" aria-pressed="false">List</button>
+            </div>
+            <button id="new-deck" class="subtle-button" type="button">New</button>
+            <button id="save-deck" class="primary-button" type="button">Validate &amp; save</button>
+          </div>
+          <p id="deck-status" class="deck-status" role="status"></p>
+          <div id="deck-summary" class="deck-summary" aria-live="polite"></div>
+          <section id="deck-primer" class="deck-primer" aria-live="polite"></section>
+          <div class="deck-workspace">
+            <div class="available-cards"><h2>Available cards</h2><input id="deck-search" type="search" placeholder="Search owned legal cards..."><div id="deck-card-list" class="deck-card-list"></div></div>
+            <div class="deck-list-panel">
+              <div id="commander-section" class="deck-section"><h2>Commander <span id="commander-total">0 / 1</span></h2><div data-deck-section="commanders"></div></div>
+              <div class="deck-section"><h2>Main deck <span id="main-total">0</span></h2><div data-deck-section="main"></div></div>
+              <div id="sideboard-section" class="deck-section"><h2>Sideboard <span id="sideboard-total">0 / 15</span></h2><div data-deck-section="sideboard"></div></div>
+              <div id="tokens-section" class="deck-section token-section"><h2>Tokens &amp; Emblems <span id="token-total">0</span></h2><p class="section-note">Automatically detected accessories. These do not count toward deck size or ownership.</p><div id="deck-tokens"></div></div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <section id="chat-view" class="tab-view" hidden>
+      <section class="deck-chat" aria-labelledby="deck-chat-title">
+        <div class="deck-chat-heading"><div><p class="eyebrow">Deck assistant</p><h1 id="deck-chat-title">Ask Codex about your cards</h1></div><span id="chat-connection" class="chat-connection">Checking connection…</span></div>
+        <p class="chat-note">Ask about your collection or a saved deck, or request deck changes. Suggestions are not saved automatically; apply them in Decks and validate the deck.</p>
+        <label class="chat-deck-label">Discuss deck<select id="chat-deck"><option value="">Collection / general question</option></select></label>
+        <div id="chat-messages" class="chat-messages" role="log" aria-live="polite"><p class="muted">Choose a deck and ask a question. ChatGPT-plan credentials stay on the server.</p></div>
+        <form id="chat-form" class="chat-form"><textarea id="chat-input" rows="2" maxlength="8000" placeholder="How can I improve this deck’s early game?" aria-label="Message Codex" disabled></textarea><button id="chat-send" class="primary-button" type="submit" disabled>Send</button></form>
+      </section>
+    </section>
+  </main>
+
+  <dialog id="card-dialog">
+    <button class="dialog-close" type="button" aria-label="Close">×</button>
+    <div id="dialog-content"></div>
+  </dialog>
+
+  <script src="/app.js" defer></script>
+</body>
+</html>

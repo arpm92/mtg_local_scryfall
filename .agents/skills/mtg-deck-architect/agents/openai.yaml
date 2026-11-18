@@ -1,0 +1,4 @@
+interface:
+  display_name: "MTG Deck Architect"
+  short_description: "Build, validate, export, and test format-aware MTG decks"
+  default_prompt: "Use $mtg-deck-architect. Start from a precise strategy and verify card-by-card mechanical synergies from Oracle text; compare Commander candidates and research them when relevant; build only from my latest owned collection, validate legality and quantities, then run 10 completed Forge baseline games and 10 completed retest games after targeted changes. Preserve versions, game logs, opponent/seat/turn evidence, synergy graph, win-condition requirements, and sources in the final report. Never imply a deck is tested unless the games completed."

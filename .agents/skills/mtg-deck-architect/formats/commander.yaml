@@ -1,0 +1,33 @@
+{
+  "name": "commander",
+  "display_name": "Commander",
+  "main_size": 99,
+  "total_size": 100,
+  "sideboard_max": 0,
+  "copy_limit": 1,
+  "singleton": true,
+  "commander_min": 1,
+  "commander_max": 2,
+  "starting_life": 40,
+  "legality_field": "commander",
+  "basic_lands_unlimited": true,
+  "simulation": {
+    "forge_game_type": "commander",
+    "players": 4,
+    "match_games": 1,
+    "seat_rotation": true,
+    "preferred_mode": "free_for_all"
+  },
+  "metrics": ["completed_games", "wins", "turns", "mana_stability", "multiplayer_resilience", "protection", "recovery", "win_conditions"],
+  "default_land_count": 37,
+  "brackets": {
+    "1": "Exhibition: theme-first; no Game Changers, intentional two-card combos, mass land denial, or extra turns; sparse tutors.",
+    "2": "Core: focused casual play; no Game Changers, intentional two-card combos, or mass land denial; sparse tutors.",
+    "3": "Upgraded: up to three Game Changers; no early two-card combos or mass land denial.",
+    "4": "Optimized: high-power play; banned list remains binding.",
+    "5": "cEDH: competitive intent and optimization; banned list remains binding."
+  },
+  "rules_url": "https://mtgcommander.net/index.php/rules/",
+  "banned_url": "https://mtgcommander.net/index.php/banned-list/",
+  "brackets_url": "https://magic.wizards.com/en/news/announcements/commander-brackets-beta-update-february-9-2026"
+}

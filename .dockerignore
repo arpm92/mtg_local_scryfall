@@ -1,0 +1,16 @@
+.git
+.venv
+__pycache__
+.playwright-cli
+.scryfall_cache
+outputs
+.secrets
+.codex-home
+.env.portainer
+tests
+collection_export_*.csv
+*_enriched.csv
+*_unmatched.csv
+MTG_Collection_Enriched.csv
+MTG_Collection_Unmatched.csv
+*.pyc
