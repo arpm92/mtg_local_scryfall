@@ -187,6 +187,25 @@ class CodexChatTests(unittest.TestCase):
         self.assertIn("Deck draft ready", result["answer"])
         self.assertNotIn("saved", result["answer"].casefold())
 
+    def test_deck_generation_resolves_a_unique_split_card_face_name(self):
+        card_name = "Blossom-Blessed Angel // Seed Suture"
+        plan = {"name": "Angel Fixture", "main": {"Blossom-Blessed Angel": 1}}
+
+        deck, _ = CodexChat._deck_from_plan(
+            plan, "standard", {card_name.casefold(): {"name": card_name}}, []
+        )
+
+        self.assertEqual(deck["main"], {card_name: 1})
+
+    def test_deck_generation_rejects_ambiguous_split_card_face_name(self):
+        first = "Shared Angel // Daybreak"
+        second = "Shared Angel // Nightfall"
+        plan = {"name": "Ambiguous Angel Fixture", "main": {"Shared Angel": 1}}
+        candidates = {first.casefold(): {"name": first}, second.casefold(): {"name": second}}
+
+        with self.assertRaisesRegex(ValueError, "ambiguous face name"):
+            CodexChat._deck_from_plan(plan, "standard", candidates, [])
+
     def test_chat_prompt_includes_only_relevant_collection_data_and_saved_deck(self):
         chat = CodexChat(command="python")
         captured = {}

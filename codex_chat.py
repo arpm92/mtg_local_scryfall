@@ -368,6 +368,12 @@ class CodexChat:
 
     @staticmethod
     def _deck_from_plan(plan, format_name, candidates, saved_decks):
+        face_candidates = defaultdict(dict)
+        for candidate in candidates.values():
+            canonical_name = str(candidate.get("name") or "").strip()
+            for face_name in re.split(r"\s*//\s*", canonical_name):
+                if face_name:
+                    face_candidates[face_name.casefold()][canonical_name.casefold()] = candidate
         sections = {}
         for section in ("main", "sideboard", "commanders"):
             value = plan.get(section) or {}
@@ -379,6 +385,12 @@ class CodexChat:
                     raise ValueError("Codex returned an invalid card count for {}.".format(raw_name))
                 name = str(raw_name).strip()
                 candidate = candidates.get(name.casefold())
+                if not candidate:
+                    face_matches = face_candidates.get(name.casefold(), {})
+                    if len(face_matches) == 1:
+                        candidate = next(iter(face_matches.values()))
+                    elif len(face_matches) > 1:
+                        raise ValueError("Codex selected ambiguous face name '{}'; use a full card name from the supplied legal collection.".format(name))
                 if not candidate:
                     raise ValueError("Codex selected '{}' which was not in the supplied legal collection.".format(name))
                 canonical = candidate["name"]
