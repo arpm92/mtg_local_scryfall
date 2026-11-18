@@ -73,8 +73,26 @@ function testEmptyOrFailedJobsDoNotReportFalseLosses() {
   ]);
 }
 
+function testForgeAiWinnerLineResolvesDeckAfterSeatPrefix() {
+  const result = stats.summarize({
+    players_in_seat_order: ['Standard Marvel heroes lifegain counters 1', 'Standard Marvel villains graveyard counters 1'],
+    attempted_games: 1,
+    completed_games: 1,
+    game_results: [
+      'Game Result: Game 1 ended in 105324 ms. Ai(1)-Standard Marvel heroes lifegain counters 1 has won!',
+    ],
+  });
+
+  assert.equal(result.unresolved, 0);
+  assert.deepEqual(result.players.map(player => [player.name, player.wins, player.losses, player.winRate]), [
+    ['Standard Marvel heroes lifegain counters 1', 1, 0, 100],
+    ['Standard Marvel villains graveyard counters 1', 0, 1, 0],
+  ]);
+}
+
 testBattleSummarizesWinsLossesAndWinRates();
 testCommanderStatsIncludeAllPodPlayers();
 testDrawsAndUnrecognizedWinnersStayOutOfWinRate();
 testEmptyOrFailedJobsDoNotReportFalseLosses();
-process.stdout.write('4 simulation statistics tests passed.\n');
+testForgeAiWinnerLineResolvesDeckAfterSeatPrefix();
+process.stdout.write('5 simulation statistics tests passed.\n');

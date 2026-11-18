@@ -4,6 +4,8 @@
   function winnerFrom(line) {
     const explicit = line.match(/\bwinner=(.+?)\s*$/i);
     if (explicit) return explicit[1].trim();
+    const forgeAi = line.match(/\bAi\(\d+\)-(.+?)\s+has won\b/i);
+    if (forgeAi) return forgeAi[1].trim();
     const legacy = line.match(/(?:Game Outcome:\s*)?(.+?)\s+has won\b/i);
     return legacy ? legacy[1].trim() : '';
   }
