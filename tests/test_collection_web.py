@@ -69,6 +69,126 @@ class CollectionWebTests(unittest.TestCase):
         ]})
         self.assertEqual((front, back), ("front.jpg", "back.jpg"))
 
+    def test_hand_tester_module_is_served_to_browser(self):
+        server = ThreadingHTTPServer(("127.0.0.1", 0), web.make_handler({"cards": []}))
+        thread = Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with urlopen("http://127.0.0.1:{}/hand_tester.js".format(server.server_port)) as response:
+                self.assertEqual(response.status, 200)
+                self.assertIn("MtgHandTester", response.read().decode("utf-8"))
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_simulation_stats_module_is_served_to_browser(self):
+        server = ThreadingHTTPServer(("127.0.0.1", 0), web.make_handler({"cards": []}))
+        thread = Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with urlopen("http://127.0.0.1:{}/simulation_stats.js".format(server.server_port)) as response:
+                self.assertEqual(response.status, 200)
+                self.assertIn("MtgSimulationStats", response.read().decode("utf-8"))
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def _post_simulation(self, decks, submitted):
+        outputs = self.root / "outputs"
+        for deck in decks:
+            directory = outputs / deck["format"]
+            directory.mkdir(parents=True, exist_ok=True)
+            (directory / (deck["name"].lower().replace(" ", "-") + ".json")).write_text(
+                json.dumps(deck), encoding="utf-8"
+            )
+
+        class FakeArchitect:
+            DEFAULT_FORGE = "/forge"
+
+        with patch.object(web, "ROOT", self.root), patch.object(web, "ForgeSimulationService") as service_type:
+            service = service_type.return_value
+            service.available.return_value = True
+            service.start.return_value = {"id": "a" * 32, "status": "queued"}
+            server = ThreadingHTTPServer(("127.0.0.1", 0), web.make_handler(
+                {"cards": []}, architect=FakeArchitect(), engine_cards=[]
+            ))
+            thread = Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                body = json.dumps(submitted).encode("utf-8")
+                request = Request(
+                    "http://127.0.0.1:{}/api/simulations".format(server.server_port),
+                    data=body,
+                    headers={"Content-Type": "application/json"},
+                )
+                try:
+                    with urlopen(request) as response:
+                        return response.status, json.loads(response.read()), service
+                except HTTPError as error:
+                    return error.code, json.loads(error.read()), service
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=2)
+
+    def test_battle_endpoint_starts_valid_same_format_pauper_and_standard_pairs(self):
+        for format_name in ("pauper", "standard"):
+            with self.subTest(format=format_name):
+                deck_a = {"name": "Deck A", "format": format_name, "main": {"Card A": 60}}
+                deck_b = {"name": "Deck B", "format": format_name, "main": {"Card B": 60}}
+                status, result, service = self._post_simulation(
+                    [deck_a, deck_b],
+                    {"mode": "battle", "format": format_name, "deckA": "Deck A", "deckB": "Deck B", "games": 2},
+                )
+                self.assertEqual(status, 202)
+                self.assertEqual(result["status"], "queued")
+                service.start.assert_called_once_with(deck_a, [deck_b], 2)
+
+    def test_battle_endpoint_rejects_missing_and_mismatched_decks(self):
+        deck_a = {"name": "Deck A", "format": "pauper", "main": {"Card A": 60}}
+        standard = {"name": "Deck B", "format": "standard", "main": {"Card B": 60}}
+        cases = (
+            ([deck_a], {"mode": "battle", "format": "pauper", "deckA": "Deck A", "deckB": "Missing"}),
+            ([deck_a, standard], {"mode": "battle", "format": "pauper", "deckA": "Deck A", "deckB": "Deck B"}),
+        )
+        for decks, submitted in cases:
+            with self.subTest(submitted=submitted):
+                status, result, service = self._post_simulation(decks, submitted)
+                self.assertEqual(status, 400)
+                self.assertIn("saved", result["error"].casefold())
+                service.start.assert_not_called()
+
+    def test_battle_endpoint_rejects_commander_pairwise_route(self):
+        decks = [
+            {"name": name, "format": "commander", "main": {"Card": 99}, "commanders": {"Leader": 1}}
+            for name in ("Deck A", "Deck B")
+        ]
+        status, result, service = self._post_simulation(
+            decks,
+            {"mode": "battle", "format": "commander", "deckA": "Deck A", "deckB": "Deck B"},
+        )
+        self.assertEqual(status, 400)
+        self.assertIn("commander", result["error"].casefold())
+        service.start.assert_not_called()
+
+    def test_existing_commander_simulation_still_requires_three_opponents(self):
+        names = ("Primary", "Opponent One", "Opponent Two", "Opponent Three")
+        decks = [
+            {"name": name, "format": "commander", "main": {"Card": 99}, "commanders": {"Leader": 1}}
+            for name in names
+        ]
+        status, result, service = self._post_simulation(
+            decks,
+            {"format": "commander", "deckName": "Primary",
+             "opponents": list(names[1:]), "games": 4},
+        )
+        self.assertEqual(status, 202)
+        self.assertEqual(result["status"], "queued")
+        self.assertEqual(service.start.call_args.args[0]["name"], "Primary")
+        self.assertEqual([item["name"] for item in service.start.call_args.args[1]], list(names[1:]))
+
     def test_printing_images_use_exact_card_uuid_and_reject_invalid_identifiers(self):
         front, back = web.printing_image_urls("33333333-3333-4333-8333-333333333333")
         self.assertEqual(front, "https://cards.scryfall.io/normal/front/3/3/33333333-3333-4333-8333-333333333333.jpg")
@@ -121,7 +241,7 @@ class CollectionWebTests(unittest.TestCase):
             def status(self):
                 return {"available": True, "message": "connected"}
 
-            def ask(self, request, saved_decks, cards):
+            def ask(self, request, saved_decks, cards, model=None):
                 self.received = (request["message"], cards)
                 return "A grounded suggestion."
 
@@ -162,7 +282,7 @@ class CollectionWebTests(unittest.TestCase):
             def is_deck_creation_request(self, request):
                 return "create" in request.get("message", "").casefold()
 
-            def create_deck(self, request, saved_decks, cards, engine, owned_cards):
+            def create_deck(self, request, saved_decks, cards, engine, owned_cards, model=None):
                 return {"deck": deck, "answer": "Created the fixture deck."}
 
         chat = FakeDeckChat()

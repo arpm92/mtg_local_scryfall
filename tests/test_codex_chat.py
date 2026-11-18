@@ -41,7 +41,7 @@ class CodexChatTests(unittest.TestCase):
             "primary_win_condition": "Win through creature combat.",
             "secondary_win_condition": "Use the sideboard for matchup adjustments.",
         }
-        chat._turn = lambda instructions, prompt: json.dumps(response)
+        chat._turn = lambda instructions, prompt, model=None: json.dumps(response)
         display_cards = [
             {"name": "Owned Sprout", "quantity": 4, "manaCost": "{G}", "manaValue": 1,
              "colors": ["G"], "colorIdentity": ["G"], "typeLine": "Creature — Plant",
@@ -72,7 +72,7 @@ class CodexChatTests(unittest.TestCase):
         chat = CodexChat(command="python")
         captured = {}
 
-        def fake_turn(instructions, prompt):
+        def fake_turn(instructions, prompt, model=None):
             captured["instructions"] = instructions
             captured["prompt"] = prompt
             return "Consider adding Owned Growth."
@@ -95,7 +95,7 @@ class CodexChatTests(unittest.TestCase):
         chat = CodexChat(command="python")
         captured = {}
 
-        def fake_turn(instructions, prompt):
+        def fake_turn(instructions, prompt, model=None):
             captured["prompt"] = prompt
             return "The two Standard lists need six copies of Shared Hero, but you own four."
 

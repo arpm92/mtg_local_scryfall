@@ -69,6 +69,14 @@ The `Decks` tab is an owned-card deck builder. Choose Commander, Pauper, or Stan
 
 The same tab has a **Deck assistant** panel. When configured, it uses Codex app-server with the server's ChatGPT sign-in and can answer questions about the collection or a saved deck. Replies render common Markdown (headings, lists, tables, links, and code). The **Codex model** selector uses the model catalog reported by app-server; an empty selection uses Codex's default. Requested deck changes are returned as proposals; chat-created decks are validated and saved, then can be simulated from **Decks → Run Forge simulation**. Sign-in data stays in the server-side Codex home and is never sent to the browser. The chat path is optional; the rest of the web app works when Codex is disconnected.
 
+## Playtest saved decks
+
+Load a saved deck in **Decks** and select **Test hand** to shuffle its main-deck copies and draw a seven-card opening hand. The browser supports redraws with the London mulligan, prompts you to bottom one card per mulligan, and lets you draw one card at a time. Commander cards stay in the command zone and never enter the library. Practice state is temporary and does not alter the saved deck.
+
+Select **Battle decks** for a direct Forge matchup between two saved Pauper or Standard decks. Choose up to 10 games; the server validates both lists and stores the results and logs under `outputs/<format>/simulations/<job-id>/`. Commander stays under **Run Forge simulation** and uses a four-player pod with three other saved Commander decks. Forge AI results are preliminary testing evidence, not a competitive strength guarantee.
+
+Completed Forge runs show a per-deck summary in the simulation panel: wins, losses, draws, win rate, completed games, and unresolved results. Detailed game output and logs remain available below the summary. Only completed games count toward win rates; games with an unknown winner are marked unresolved.
+
 ## Format-aware deck architect
 
 The reusable engine and Codex skill live in `.agents/skills/mtg-deck-architect/`. Analyze or build from the command line with:

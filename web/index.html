@@ -89,6 +89,8 @@
             </div>
             <button id="new-deck" class="subtle-button" type="button">New</button>
             <button id="simulate-deck" class="subtle-button" type="button" disabled>Run Forge simulation</button>
+            <button id="test-hand" class="subtle-button" type="button" disabled>Test hand</button>
+            <button id="battle-decks" class="subtle-button" type="button" disabled>Battle decks</button>
             <button id="save-deck" class="primary-button" type="button">Validate &amp; save</button>
           </div>
           <p id="deck-status" class="deck-status" role="status"></p>
@@ -120,6 +122,43 @@
       </section>
     </section>
   </main>
+
+  <dialog id="hand-dialog" class="hand-dialog">
+    <button id="close-hand" class="dialog-close" type="button" aria-label="Close hand tester">×</button>
+    <section class="hand-tester" aria-labelledby="hand-title">
+      <p class="eyebrow">Practice draw</p>
+      <h2 id="hand-title">Opening hand</h2>
+      <p id="hand-deck-label" class="muted"></p>
+      <p id="hand-status" class="hand-status" role="status" aria-live="polite"></p>
+      <div id="hand-cards" class="hand-cards" aria-label="Cards in current hand"></div>
+      <div class="hand-actions">
+        <button id="hand-mulligan" class="subtle-button" type="button">Mulligan</button>
+        <button id="hand-keep" class="subtle-button" type="button">Keep hand</button>
+        <button id="hand-confirm-bottom" class="primary-button" type="button" hidden>Confirm bottom cards</button>
+        <button id="hand-draw" class="subtle-button" type="button" hidden>Draw one</button>
+        <button id="hand-reset" class="subtle-button" type="button">Shuffle / reset</button>
+      </div>
+    </section>
+  </dialog>
+
+  <dialog id="battle-dialog" class="battle-dialog">
+    <button id="close-battle" class="dialog-close" type="button" aria-label="Close deck battle">×</button>
+    <form id="battle-form" class="simulation-form">
+      <p class="eyebrow">MTG Forge · 1v1</p>
+      <h2>Battle decks</h2>
+      <p class="muted">Compare two saved Pauper or Standard decks. Both lists are validated before Forge starts.</p>
+      <label class="battle-format-label">Format<select id="battle-format"><option value="pauper">Pauper</option><option value="standard">Standard</option></select></label>
+      <div class="battle-deck-pickers">
+        <label>Deck A<select id="battle-deck-a" required></select></label>
+        <span aria-hidden="true">VS</span>
+        <label>Deck B<select id="battle-deck-b" required></select></label>
+      </div>
+      <label class="simulation-games-label">Games (1–10)<input id="battle-games" type="number" min="1" max="10" value="10"></label>
+      <p id="battle-status" class="simulation-status" role="status" aria-live="polite"></p>
+      <div id="battle-results" class="simulation-results"></div>
+      <div class="import-actions"><button id="cancel-battle" class="subtle-button" type="button">Close</button><button id="start-battle" class="primary-button" type="submit" disabled>Start battle</button></div>
+    </form>
+  </dialog>
 
   <dialog id="simulation-dialog" class="simulation-dialog">
     <button id="close-simulation" class="dialog-close" type="button" aria-label="Close">×</button>
@@ -155,6 +194,8 @@
     </form>
   </dialog>
 
+  <script src="/hand_tester.js" defer></script>
+  <script src="/simulation_stats.js" defer></script>
   <script src="/app.js" defer></script>
 </body>
 </html>

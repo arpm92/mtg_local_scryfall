@@ -345,6 +345,8 @@ def make_handler(payload, architect=None, engine_cards=None, auth_username="", a
         "/": ("index.html", "text/html; charset=utf-8"),
         "/index.html": ("index.html", "text/html; charset=utf-8"),
         "/app.js": ("app.js", "text/javascript; charset=utf-8"),
+        "/hand_tester.js": ("hand_tester.js", "text/javascript; charset=utf-8"),
+        "/simulation_stats.js": ("simulation_stats.js", "text/javascript; charset=utf-8"),
         "/styles.css": ("styles.css", "text/css; charset=utf-8"),
     }
 
@@ -513,6 +515,27 @@ def make_handler(payload, architect=None, engine_cards=None, auth_username="", a
                         self.send_json(503, {"error": "Forge is not available. Check the Java runtime and mounted Forge installation."})
                         return
                     format_name = str(submitted.get("format") or "").casefold()
+                    if submitted.get("mode") == "battle":
+                        if format_name not in ("pauper", "standard"):
+                            raise ValueError("Deck battles support Pauper and Standard; Commander uses four-player simulations.")
+                        saved = self.saved_decks()
+                        deck_a_name = str(submitted.get("deckA") or "")
+                        deck_b_name = str(submitted.get("deckB") or "")
+                        if not deck_a_name or not deck_b_name or deck_a_name.casefold() == deck_b_name.casefold():
+                            raise ValueError("Choose two different saved decks for the battle.")
+                        deck_a = next((item for item in saved if item.get("name") == deck_a_name
+                                       and item.get("format") == format_name), None)
+                        deck_b = next((item for item in saved if item.get("name") == deck_b_name
+                                       and item.get("format") == format_name), None)
+                        if not deck_a or not deck_b:
+                            raise ValueError("Choose two saved {} decks.".format(format_name.title()))
+                        try:
+                            job = simulation_service.start(deck_a, [deck_b], submitted.get("games", 10))
+                        except SimulationBusyError as error:
+                            self.send_json(409, {"error": str(error)})
+                            return
+                        self.send_json(202, job)
+                        return
                     deck_name = str(submitted.get("deckName") or "")
                     saved = self.saved_decks()
                     deck = next((item for item in saved if item.get("name") == deck_name

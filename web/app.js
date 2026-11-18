@@ -333,6 +333,8 @@ function renderDeckBuilder() {
   const config = state.formats[format] || {main_size: 0, sideboard_target: 0, commander_min: 0};
   $('#deck-name').readOnly = scanned; $('#deck-format').disabled = scanned; $('#save-deck').disabled = scanned;
   $('#simulate-deck').disabled = !state.deckInfo || scanned || !state.simulationAvailable;
+  $('#test-hand').disabled = !state.deckInfo || scanned;
+  updateBattleButton();
   document.querySelector('.available-cards').hidden = scanned;
   $('#commander-section').hidden = format !== 'commander'; $('#sideboard-section').hidden = format === 'commander' || scanned;
   if (scanned) $('#deck-status').textContent = 'Scanned deck · unclassified · card copies reserved in your collection.';
@@ -361,14 +363,15 @@ function renderDeckBuilder() {
   });
   renderTokens();
 }
-function newDeck() { state.deckInfo = null; state.reservationDeck = null; if ($('#deck-format').value === 'scanned') $('#deck-format').value = 'commander'; state.deck = {main: {}, sideboard: {}, commanders: {}}; $('#deck-name').value = 'New Deck'; $('#deck-status').textContent = ''; renderDeckBuilder(); }
-function loadSavedDeck(deck) { state.deckInfo = deck; state.reservationDeck = deck.format === 'scanned' ? null : {name: deck.name, format: deck.format}; state.deck = {main: {...deck.main}, sideboard: {...(deck.sideboard || {})}, commanders: {...(deck.commanders || {})}}; $('#deck-name').value = deck.name; $('#deck-format').value = deck.format; $('#chat-deck').value = deck.name; renderDeckBuilder(); }
+function newDeck() { closeHandTester(); state.deckInfo = null; state.reservationDeck = null; if ($('#deck-format').value === 'scanned') $('#deck-format').value = 'commander'; state.deck = {main: {}, sideboard: {}, commanders: {}}; $('#deck-name').value = 'New Deck'; $('#deck-status').textContent = ''; renderDeckBuilder(); }
+function loadSavedDeck(deck) { closeHandTester(); state.deckInfo = deck; state.reservationDeck = deck.format === 'scanned' ? null : {name: deck.name, format: deck.format}; state.deck = {main: {...deck.main}, sideboard: {...(deck.sideboard || {})}, commanders: {...(deck.commanders || {})}}; $('#deck-name').value = deck.name; $('#deck-format').value = deck.format; $('#chat-deck').value = deck.name; renderDeckBuilder(); }
 function renderSavedDecks() {
   $('#deck-count').textContent = `${state.savedDecks.length} saved deck${state.savedDecks.length === 1 ? '' : 's'}`;
   $('#saved-decks').innerHTML = state.savedDecks.map((deck,index) => `<div class="saved-deck-row"><button class="saved-deck" data-saved="${index}">${escapeHtml(deck.name)}<small>${deck.format === 'scanned' ? 'Scanned deck · unclassified' : escapeHtml(deck.format)}</small></button><button class="delete-deck" type="button" data-delete-deck="${index}" aria-label="Delete ${escapeHtml(deck.name)}" title="Delete deck">×</button></div>`).join('') || '<p class="muted">No saved decks yet.</p>';
   const picker = $('#chat-deck'); const selected = picker.value;
   picker.innerHTML = '<option value="">Collection / general question</option>' + state.savedDecks.map(deck => `<option value="${escapeHtml(deck.name)}">${escapeHtml(deck.name)} (${escapeHtml(deck.format)})</option>`).join('');
   if (state.savedDecks.some(deck => deck.name === selected)) picker.value = selected;
+  updateBattleButton();
 }
 async function deleteDeck(index) {
   const deck = state.savedDecks[index]; if (!deck) return;
@@ -406,6 +409,214 @@ document.querySelectorAll('[data-deck-view]').forEach(button => button.addEventL
 $('#deck-search').addEventListener('input', renderDeckBuilder); $('#deck-format').addEventListener('change', newDeck); $('#new-deck').addEventListener('click', newDeck); $('#save-deck').addEventListener('click', saveDeck);
 
 const simulationDialog = $('#simulation-dialog');
+const handDialog = $('#hand-dialog');
+const battleDialog = $('#battle-dialog');
+
+function closeHandTester() {
+  if (handDialog.open) handDialog.close();
+  state.handTestDeck = null;
+  state.handTestState = null;
+}
+function openHandTester() {
+  const deck = state.deckInfo;
+  if (!deck || deck.format === 'scanned') return;
+  state.handTestDeck = deck;
+  state.handTestState = window.MtgHandTester.newState(deck);
+  $('#hand-deck-label').textContent = `${deck.name} · ${deck.format[0].toUpperCase()}${deck.format.slice(1)}`;
+  renderHandTester();
+  handDialog.showModal();
+}
+function renderHandTester() {
+  const handState = state.handTestState;
+  if (!handState) return;
+  const bottoming = handState.phase === 'bottoming';
+  const selected = new Set(handState.bottomSelection);
+  $('#hand-cards').innerHTML = handState.hand.map(copy => {
+    const card = state.all.find(item => item.name === copy.name);
+    const art = card?.imageUrl
+      ? `<img src="${escapeHtml(card.imageUrl)}" alt="${escapeHtml(copy.name)}" loading="lazy">`
+      : `<span class="hand-art-fallback">${escapeHtml(copy.name)}</span>`;
+    const preview = card && Number.isInteger(card.index)
+      ? `<button class="hand-card-art" type="button" data-preview-index="${card.index}" aria-label="View ${escapeHtml(copy.name)}">${art}</button>`
+      : `<div class="hand-card-art">${art}</div>`;
+    const isSelected = selected.has(copy.id);
+    return `<article class="hand-card ${isSelected ? 'bottom-selected' : ''}">${preview}<span class="hand-card-name" title="${escapeHtml(copy.name)}">${escapeHtml(copy.name)}</span>${bottoming ? `<button class="hand-bottom-toggle" type="button" data-hand-bottom="${escapeHtml(copy.id)}" aria-pressed="${isSelected}">${isSelected ? 'Selected to bottom' : 'Select to bottom'}</button>` : ''}</article>`;
+  }).join('') || '<p class="muted">This deck has no cards in its main section.</p>';
+
+  if (bottoming) {
+    const count = handState.mulligans;
+    $('#hand-status').textContent = `Choose exactly ${count} card${count === 1 ? '' : 's'} to put on the bottom. ${handState.bottomSelection.length} of ${count} selected.`;
+  } else if (handState.phase === 'opening') {
+    $('#hand-status').textContent = `Opening hand: ${handState.hand.length} card${handState.hand.length === 1 ? '' : 's'} · ${handState.mulligans} mulligan${handState.mulligans === 1 ? '' : 's'} taken. Keep or mulligan.`;
+  } else {
+    $('#hand-status').textContent = `Hand kept · ${handState.library.length} cards in library · ${handState.drawn} extra card${handState.drawn === 1 ? '' : 's'} drawn.`;
+  }
+  $('#hand-mulligan').hidden = handState.phase !== 'opening';
+  $('#hand-keep').hidden = handState.phase !== 'opening';
+  $('#hand-confirm-bottom').hidden = !bottoming;
+  $('#hand-confirm-bottom').disabled = bottoming && handState.bottomSelection.length !== handState.mulligans;
+  $('#hand-draw').hidden = handState.phase !== 'ready';
+  $('#hand-draw').disabled = handState.phase === 'ready' && handState.library.length === 0;
+}
+function withHandState(action) {
+  try {
+    action(state.handTestState);
+    renderHandTester();
+  } catch (error) {
+    $('#hand-status').textContent = error.message;
+  }
+}
+$('#test-hand').addEventListener('click', openHandTester);
+$('#close-hand').addEventListener('click', closeHandTester);
+$('#hand-dialog').addEventListener('close', () => { state.handTestDeck = null; state.handTestState = null; });
+$('#hand-dialog').addEventListener('click', event => {
+  const preview = event.target.closest('[data-preview-index]');
+  const bottom = event.target.closest('[data-hand-bottom]');
+  if (preview) openCard(Number(preview.dataset.previewIndex));
+  else if (bottom) withHandState(handState => window.MtgHandTester.toggleBottom(handState, bottom.dataset.handBottom));
+});
+$('#hand-mulligan').addEventListener('click', () => withHandState(handState => window.MtgHandTester.mulligan(handState)));
+$('#hand-keep').addEventListener('click', () => withHandState(handState => window.MtgHandTester.keep(handState)));
+$('#hand-confirm-bottom').addEventListener('click', () => withHandState(handState => window.MtgHandTester.confirmBottom(handState)));
+$('#hand-draw').addEventListener('click', () => withHandState(handState => window.MtgHandTester.draw(handState)));
+$('#hand-reset').addEventListener('click', () => {
+  if (state.handTestDeck) state.handTestState = window.MtgHandTester.reset(state.handTestState, state.handTestDeck);
+  renderHandTester();
+});
+
+function updateBattleButton() {
+  const availableDecks = state.savedDecks.filter(deck => deck.format === 'pauper' || deck.format === 'standard');
+  $('#battle-decks').disabled = !state.simulationAvailable || availableDecks.length < 2;
+  $('#battle-decks').title = !state.simulationAvailable
+    ? 'Forge runtime or installation is unavailable on the server.'
+    : availableDecks.length < 2 ? 'Save at least two Pauper or Standard decks to start a battle.' : '';
+}
+function updateBattleStart() {
+  const format = $('#battle-format').value;
+  const choices = state.savedDecks.filter(deck => deck.format === format);
+  const deckA = $('#battle-deck-a').value;
+  const deckB = $('#battle-deck-b').value;
+  const games = Number($('#battle-games').value);
+  $('#start-battle').disabled = !state.simulationAvailable || choices.length < 2 || !deckA || !deckB ||
+    deckA === deckB || !Number.isInteger(games) || games < 1 || games > 10;
+}
+function setBattlePending(pending) {
+  $('#battle-format').disabled = pending;
+  $('#battle-deck-a').disabled = pending;
+  $('#battle-deck-b').disabled = pending;
+  $('#battle-games').disabled = pending;
+}
+function forgeStatisticsMarkup(job) {
+  const summary = window.MtgSimulationStats?.summarize(job);
+  if (!summary || !summary.completed || !summary.players.length) return '';
+  const players = summary.players.map(player => {
+    const rate = player.winRate === null ? '—' : `${player.winRate.toFixed(1)}%`;
+    return `<article class="forge-stat-card"><h4>${escapeHtml(player.name)}</h4><strong class="forge-stat-record">${player.wins}–${player.losses}${player.draws ? `–${player.draws}` : ''}</strong><span>W–L${player.draws ? '–D' : ''}</span><dl><div><dt>Wins</dt><dd>${player.wins}</dd></div><div><dt>Losses</dt><dd>${player.losses}</dd></div>${player.draws ? `<div><dt>Draws</dt><dd>${player.draws}</dd></div>` : ''}<div><dt>Win rate</dt><dd>${rate}</dd></div></dl></article>`;
+  }).join('');
+  const unresolved = summary.unresolved
+    ? `<p class="forge-stats-note">${summary.unresolved} completed game${summary.unresolved === 1 ? '' : 's'} had no recognized winner and are excluded from losses.</p>` : '';
+  return `<section class="forge-statistics" aria-label="Forge game statistics"><h3>Game statistics</h3><p class="forge-stats-summary">${summary.completed} completed of ${summary.attempted} attempted</p><div class="forge-stat-grid">${players}</div>${unresolved}</section>`;
+}
+function populateBattleDecks() {
+  const choices = state.savedDecks.filter(deck => deck.format === $('#battle-format').value);
+  const fill = (select, preferred, excluded = '') => {
+    select.innerHTML = '<option value="">Choose a saved deck</option>' + choices
+      .filter(deck => deck.name !== excluded)
+      .map(deck => `<option value="${escapeHtml(deck.name)}">${escapeHtml(deck.name)}</option>`).join('');
+    if (choices.some(deck => deck.name === preferred && deck.name !== excluded)) select.value = preferred;
+    else select.value = choices.find(deck => deck.name !== excluded)?.name || '';
+  };
+  const oldA = $('#battle-deck-a').value;
+  const oldB = $('#battle-deck-b').value;
+  fill($('#battle-deck-a'), oldA);
+  fill($('#battle-deck-b'), oldB, $('#battle-deck-a').value);
+  if (!$('#battle-deck-b').value) fill($('#battle-deck-b'), '', $('#battle-deck-a').value);
+  updateBattleStart();
+}
+function openBattleDialog() {
+  if (!state.simulationAvailable) return;
+  setBattlePending(false);
+  const currentFormat = ['pauper', 'standard'].includes(state.deckInfo?.format) ? state.deckInfo.format : '';
+  const defaultFormat = currentFormat || ['standard', 'pauper'].find(format =>
+    state.savedDecks.filter(deck => deck.format === format).length > 1) || 'pauper';
+  $('#battle-format').value = defaultFormat;
+  $('#battle-games').value = '10';
+  $('#battle-status').textContent = '';
+  $('#battle-results').innerHTML = '';
+  $('#start-battle').textContent = 'Start battle';
+  populateBattleDecks();
+  if (currentFormat && state.savedDecks.some(deck => deck.format === currentFormat && deck.name === state.deckInfo.name)) {
+    $('#battle-deck-a').value = state.deckInfo.name;
+    populateBattleDecks();
+  }
+  battleDialog.showModal();
+}
+function showBattleJob(job) {
+  const complete = ['completed', 'partial', 'failed', 'timeout', 'interrupted'].includes(job.status);
+  const status = $('#battle-status');
+  status.className = `simulation-status ${complete && job.status !== 'completed' ? 'error' : complete ? 'success' : ''}`;
+  if (job.status === 'queued' || job.status === 'running') {
+    setBattlePending(true);
+    status.textContent = job.status === 'queued' ? 'Battle queued…' : `Forge is running (${job.completed_games || 0}/${job.games_requested} games reported)…`;
+    $('#start-battle').disabled = true;
+    $('#start-battle').textContent = 'Running…';
+    return false;
+  }
+  setBattlePending(false);
+  $('#start-battle').textContent = 'Run again';
+  status.textContent = job.status === 'completed'
+    ? `Completed ${job.completed_games} of ${job.games_requested} games. Forge results are preliminary AI evidence.`
+    : `${job.message || `Battle ${job.status}.`} Completed ${job.completed_games || 0} of ${job.games_requested} games.`;
+  const lines = (job.game_results || []).slice(0, 20);
+  $('#battle-results').innerHTML = `${forgeStatisticsMarkup(job)}${lines.length ? `<h3>Forge result lines</h3><ul>${lines.map(line => `<li><code>${escapeHtml(line)}</code></li>`).join('')}</ul>` : ''}<p class="muted">Evidence saved under <code>outputs/${escapeHtml(job.output_directory || '')}</code>${job.stdout_log ? ` · Logs: <code>${escapeHtml(job.stdout_log)}</code> and <code>${escapeHtml(job.stderr_log)}</code>` : ''}</p>`;
+  updateBattleStart();
+  return true;
+}
+async function startBattle(event) {
+  event.preventDefault();
+  updateBattleStart();
+  if ($('#start-battle').disabled) return;
+  const format = $('#battle-format').value;
+  const body = {
+    mode: 'battle', format, deckA: $('#battle-deck-a').value,
+    deckB: $('#battle-deck-b').value, games: Number($('#battle-games').value),
+  };
+  const status = $('#battle-status');
+  status.className = 'simulation-status';
+  status.textContent = 'Starting Forge battle…';
+  $('#start-battle').disabled = true;
+  setBattlePending(true);
+  try {
+    const response = await fetch('/api/simulations', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body),
+    });
+    let job = await response.json();
+    if (!response.ok) throw new Error(job.error || `Server returned ${response.status}`);
+    showBattleJob(job);
+    while (['queued', 'running'].includes(job.status)) {
+      await new Promise(resolve => setTimeout(resolve, 2500));
+      const result = await fetch(`/api/simulations/${encodeURIComponent(job.id)}`, {cache: 'no-store'});
+      job = await result.json();
+      if (!result.ok) throw new Error(job.error || 'Could not read battle status.');
+      showBattleJob(job);
+    }
+  } catch (error) {
+    setBattlePending(false);
+    status.className = 'simulation-status error';
+    status.textContent = error.message;
+    updateBattleStart();
+    $('#start-battle').textContent = 'Start battle';
+  }
+}
+$('#battle-decks').addEventListener('click', openBattleDialog);
+$('#battle-format').addEventListener('change', populateBattleDecks);
+$('#battle-deck-a').addEventListener('change', () => { populateBattleDecks(); });
+$('#battle-deck-b').addEventListener('change', updateBattleStart);
+$('#battle-games').addEventListener('input', updateBattleStart);
+$('#battle-form').addEventListener('submit', startBattle);
+$('#close-battle').addEventListener('click', () => battleDialog.close());
+$('#cancel-battle').addEventListener('click', () => battleDialog.close());
+
 function updateSimulationStart() {
   const required = Number(simulationDialog.dataset.required || 0);
   const selected = $('#simulation-opponents').querySelectorAll('input[type="checkbox"]:checked').length;
@@ -449,7 +660,7 @@ function showSimulationJob(job) {
     ? `Completed ${job.completed_games} of ${job.games_requested} requested games. Forge results are preliminary AI evidence.`
     : `${job.message || `Simulation ${job.status}.`} Completed ${job.completed_games || 0} of ${job.games_requested} games.`;
   const results = (job.game_results || []).slice(0, 20);
-  $('#simulation-results').innerHTML = `${results.length ? `<h3>Forge result lines</h3><ul>${results.map(line => `<li><code>${escapeHtml(line)}</code></li>`).join('')}</ul>` : ''}<p class="muted">Evidence saved under <code>outputs/${escapeHtml(job.output_directory || '')}</code>${job.stdout_log ? ` · Logs: <code>${escapeHtml(job.stdout_log)}</code> and <code>${escapeHtml(job.stderr_log)}</code>` : ''}</p>`;
+  $('#simulation-results').innerHTML = `${forgeStatisticsMarkup(job)}${results.length ? `<h3>Forge result lines</h3><ul>${results.map(line => `<li><code>${escapeHtml(line)}</code></li>`).join('')}</ul>` : ''}<p class="muted">Evidence saved under <code>outputs/${escapeHtml(job.output_directory || '')}</code>${job.stdout_log ? ` · Logs: <code>${escapeHtml(job.stdout_log)}</code> and <code>${escapeHtml(job.stderr_log)}</code>` : ''}</p>`;
   return true;
 }
 async function startSimulation(event) {
