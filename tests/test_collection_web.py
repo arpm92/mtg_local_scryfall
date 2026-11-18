@@ -11,6 +11,7 @@ from urllib.request import Request, urlopen
 from unittest.mock import patch
 
 import collection_web as web
+from codex_chat import CodexChat
 
 
 class CollectionWebTests(unittest.TestCase):
@@ -299,10 +300,14 @@ class CollectionWebTests(unittest.TestCase):
                 "report": {"primary_objective": "Win through creature combat."}}
 
         class FakeDeckChat:
+            def pending_deck_creation_request(self, request):
+                return CodexChat.pending_deck_creation_request(request)
+
             def is_deck_creation_request(self, request):
                 return "create" in request.get("message", "").casefold()
 
             def create_deck(self, request, saved_decks, cards, engine, owned_cards, model=None):
+                self.received_message = request["message"]
                 return {"deck": deck, "answer": "Created the fixture deck."}
 
         chat = FakeDeckChat()
@@ -314,12 +319,19 @@ class CollectionWebTests(unittest.TestCase):
             thread.start()
             base = "http://127.0.0.1:{}".format(server.server_port)
             try:
-                body = json.dumps({"message": "Create a mono-green Pauper deck."}).encode("utf-8")
+                body = json.dumps({
+                    "message": "Pauper",
+                    "history": [
+                        {"role": "user", "content": "Create a mono-green Pauper deck."},
+                        {"role": "assistant", "content": "Which format should I use: Commander, Pauper, or Standard?"},
+                    ],
+                }).encode("utf-8")
                 request = Request(base + "/api/chat", data=body, headers={"Content-Type": "application/json"})
                 with urlopen(request) as response:
                     result = json.loads(response.read())
                     self.assertEqual(response.status, 201)
                 self.assertTrue(result["deck"]["validation"]["valid"])
+                self.assertEqual(chat.received_message, "Create a mono-green Pauper deck. Pauper")
                 self.assertTrue(Path(result["files"]["json"]).is_file())
                 self.assertTrue(Path(result["files"]["forge"]).is_file())
                 with urlopen(base + "/api/decks") as response:

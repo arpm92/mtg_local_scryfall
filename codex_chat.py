@@ -135,11 +135,18 @@ class CodexChat:
         history = request.get("history") or []
         if not isinstance(history, list) or len(history) > 20:
             raise ValueError("Chat history is invalid or too long. Start a new chat.")
+        prior_user_messages = [
+            str(item.get("content") or "")[:4000]
+            for item in history[-12:]
+            if isinstance(item, dict) and item.get("role") == "user"
+        ]
+        retrieval_question = "\n".join(prior_user_messages + [question])
         selected_name = str(request.get("deckName") or "")[:100]
         deck = next((d for d in saved_decks if d.get("name") == selected_name), None)
-        compared_decks = self._comparison_decks(question, saved_decks, deck)
-        inventory = self._relevant_cards(question, deck, cards, compared_decks)
-        name_matches = self._card_name_matches(question, cards)
+        compared_decks = self._comparison_decks(retrieval_question, saved_decks, deck)
+        inventory = self._relevant_cards(retrieval_question, deck, cards, compared_decks)
+        name_matches = self._card_name_matches(retrieval_question, cards)
+        type_summary = self._owned_card_type_summary(retrieval_question, cards)
         combined_demand = self._combined_collection_demand(compared_decks, cards)
         conversation = []
         for item in history[-12:]:
@@ -152,6 +159,7 @@ class CodexChat:
             "combined_collection_demand": combined_demand,
             "all_compared_decks_buildable_together": not any(item["shortage"] for item in combined_demand),
             "card_name_matches_from_question": name_matches,
+            "owned_card_type_summary": type_summary,
             "owned_cards_matching_question_or_deck": inventory,
             "conversation": conversation,
             "question": question,
@@ -159,6 +167,7 @@ class CodexChat:
         instructions = (
             "You are the MTG deck assistant inside a private collection web app. "
             "Use the supplied saved_decks card lists and owned-card facts for collection claims. "
+            "Use owned_card_type_summary for creature-type questions; distinguish distinct card names, owned copies, available copies, and format-legal counts. "
             "For available copies, use each card's availability totals and per-deck reservations; quantity is total owned. "
             "Do not invent ownership, Oracle text, legality, deck contents, or rules. Say when evidence is absent. "
             "When asked whether several saved decks can be built at once, compare their combined demand across main decks, sideboards, and commanders against owned quantities. "
@@ -189,6 +198,31 @@ class CodexChat:
         create_verb = re.search(r"\b(create|build|make|generate|brew|design|put together)\b", message)
         wants_deck = re.search(r"\b(?:i(?:'d| would| want| need| would love)|please)\b.{0,60}\b(?:new|fresh|another|a|an)?\s*(?:commander|pauper|standard)?\s*deck\b", message)
         return bool(has_deck and (create_verb or explicit_new or wants_deck))
+
+    @staticmethod
+    def pending_deck_creation_request(request):
+        """Recover a deck request when the user answers the bot's format question."""
+        message = str(request.get("message") or "").strip()
+        if not re.fullmatch(r"(?:commander|edh|pauper|standard)[.!]?", message, re.IGNORECASE):
+            return None
+        history = request.get("history") or []
+        if not isinstance(history, list):
+            return None
+        assistant_turn = next((
+            (index, str(item.get("content") or ""))
+            for index, item in reversed(list(enumerate(history)))
+            if isinstance(item, dict) and item.get("role") == "assistant"
+        ), None)
+        if not assistant_turn or not re.search(r"which format should i use|what format should i use", assistant_turn[1], re.IGNORECASE):
+            return None
+        prior_request = next((
+            str(item.get("content") or "").strip()
+            for item in reversed(history[:assistant_turn[0]])
+            if isinstance(item, dict) and item.get("role") == "user"
+        ), "")
+        if prior_request and CodexChat.is_deck_creation_request({"message": prior_request}):
+            return "{} {}".format(prior_request, message.rstrip(".!"))
+        return None
 
     def create_deck(self, request, saved_decks, cards, architect, engine_cards, model=None):
         """Ask Codex for a collection-only deck draft, validate it, and return it unsaved."""
@@ -454,7 +488,14 @@ class CodexChat:
 
     @staticmethod
     def _relevant_cards(question, deck, cards, additional_decks=()):
-        words = {part.casefold() for part in question.split() if len(part) > 2}
+        words = set()
+        for part in re.findall(r"[a-z0-9]+", question.casefold()):
+            if part in ("angels", "angel"):
+                words.add("angel")
+            elif part in ("demons", "demon", "daemons", "daemon", "deamons", "deamon"):
+                words.add("demon")
+            elif len(part) > 2:
+                words.add(part)
         deck_names = set()
         for source in ([deck] if deck else []) + list(additional_decks or []):
             for section in ("main", "sideboard", "commanders"):
@@ -516,6 +557,53 @@ class CodexChat:
                 "typeLine", "oracleText", "keywords", "producedMana", "legalities", "commander", "availability"
             )})
         return selected
+
+    @staticmethod
+    def _owned_card_type_summary(question, cards):
+        type_terms = {}
+        for match in re.finditer(r"\b(angels?|demons?|daemons?|deamons?)\b", question, re.IGNORECASE):
+            term = match.group(1).casefold()
+            normalized = "angel" if term.startswith("angel") else "demon"
+            type_terms[normalized] = "Angel" if normalized == "angel" else "Demon"
+        if not type_terms:
+            return {}
+
+        format_name = CodexChat._requested_format(question)
+        result = {}
+        for key, display_name in type_terms.items():
+            matched = [card for card in cards if re.search(
+                r"\b{}\b".format(display_name), str(card.get("typeLine") or ""), re.IGNORECASE
+            ) and int(card.get("quantity") or 0) > 0]
+            legal = [card for card in matched if not format_name or
+                     (card.get("legalities") or {}).get(format_name) == "legal"]
+            result[key] = {
+                "type": display_name,
+                "distinct_cards": len(matched),
+                "owned_copies": sum(int(card.get("quantity") or 0) for card in matched),
+                "available_copies": sum(int((card.get("availability") or {}).get("available", card.get("quantity") or 0)) for card in matched),
+                "standard_legal_distinct": len([card for card in matched if (card.get("legalities") or {}).get("standard") == "legal"]),
+                "standard_legal_copies": sum(int(card.get("quantity") or 0) for card in matched
+                                              if (card.get("legalities") or {}).get("standard") == "legal"),
+                "standard_legal_available_copies": sum(
+                    int((card.get("availability") or {}).get("available", card.get("quantity") or 0))
+                    for card in matched if (card.get("legalities") or {}).get("standard") == "legal"
+                ),
+                "requested_format": format_name,
+                "requested_format_legal_distinct": len(legal),
+                "requested_format_legal_copies": sum(int(card.get("quantity") or 0) for card in legal),
+                "requested_format_available_copies": sum(
+                    int((card.get("availability") or {}).get("available", card.get("quantity") or 0))
+                    for card in legal
+                ),
+                "cards": [{
+                    "name": str(card.get("name") or ""),
+                    "owned": int(card.get("quantity") or 0),
+                    "available": int((card.get("availability") or {}).get("available", card.get("quantity") or 0)),
+                    "standard_legality": (card.get("legalities") or {}).get("standard", "unknown"),
+                    "requested_format_legality": (card.get("legalities") or {}).get(format_name, "unknown") if format_name else None,
+                } for card in matched],
+            }
+        return result
 
     def _turn(self, instructions, prompt, model=None):
         env = os.environ.copy()

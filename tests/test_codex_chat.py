@@ -15,6 +15,54 @@ import architect
 
 
 class CodexChatTests(unittest.TestCase):
+    def test_format_reply_continues_pending_deck_creation_request(self):
+        request = {
+            "message": "Standard",
+            "history": [
+                {"role": "user", "content": "Can you create an angels-deamon deck with 60 cards?"},
+                {"role": "assistant", "content": "Which format should I use: Commander, Pauper, or Standard?"},
+            ],
+        }
+
+        resolved = CodexChat.pending_deck_creation_request(request)
+
+        self.assertEqual(resolved, "Can you create an angels-deamon deck with 60 cards? Standard")
+
+    def test_type_context_uses_prior_turn_and_reports_owned_names_and_copies(self):
+        chat = CodexChat(command="python")
+        captured = {}
+
+        def fake_turn(instructions, prompt, model=None):
+            captured["instructions"] = instructions
+            captured["prompt"] = prompt
+            return "The collection has Angel cards, but no Demons."
+
+        chat._turn = fake_turn
+        cards = [
+            {"name": "Angel One", "quantity": 3, "typeLine": "Creature — Angel",
+             "legalities": {"standard": "legal"}, "oracleId": "angel-one",
+             "availability": {"available": 1}},
+            {"name": "Angel Two", "quantity": 2, "typeLine": "Creature — Angel Cleric",
+             "legalities": {"standard": "not_legal"}, "oracleId": "angel-two"},
+        ]
+        history = [
+            {"role": "user", "content": "Can you make an angels-deamon deck?"},
+            {"role": "assistant", "content": "Which format should I use?"},
+        ]
+
+        chat.ask({"message": "Standard", "history": history}, [], cards)
+        context = json.loads(captured["prompt"].split("Use this supplied application context:\n", 1)[1])
+
+        self.assertEqual(context["owned_card_type_summary"]["angel"]["distinct_cards"], 2)
+        self.assertEqual(context["owned_card_type_summary"]["angel"]["owned_copies"], 5)
+        self.assertEqual(context["owned_card_type_summary"]["angel"]["available_copies"], 3)
+        self.assertEqual(context["owned_card_type_summary"]["angel"]["standard_legal_distinct"], 1)
+        self.assertEqual(context["owned_card_type_summary"]["angel"]["standard_legal_copies"], 3)
+        self.assertEqual(context["owned_card_type_summary"]["angel"]["standard_legal_available_copies"], 1)
+        self.assertEqual(context["owned_card_type_summary"]["demon"]["distinct_cards"], 0)
+        self.assertIn("Use owned_card_type_summary for creature-type questions", captured["instructions"])
+        self.assertEqual({card["name"] for card in context["owned_cards_matching_question_or_deck"]}, {"Angel One", "Angel Two"})
+
     def test_default_codex_timeout_allows_longer_collection_comparisons(self):
         with patch.dict(os.environ, {
             "MTG_CODEX_ENABLED": "true", "MTG_CODEX_COMMAND": "codex", "CODEX_HOME": "/tmp/codex-test"

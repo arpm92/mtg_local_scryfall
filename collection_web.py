@@ -594,6 +594,12 @@ def make_handler(payload, architect=None, engine_cards=None, auth_username="", a
                     model = str(submitted.get("model") or "").strip()
                     if model and not any(item.get("id") == model for item in chat.model_options()):
                         raise ValueError("Choose a model from the available Codex model list.")
+                    pending_deck_request = (
+                        chat.pending_deck_creation_request(submitted)
+                        if hasattr(chat, "pending_deck_creation_request") else None
+                    )
+                    if pending_deck_request:
+                        submitted = dict(submitted, message=pending_deck_request)
                     if hasattr(chat, "is_deck_creation_request") and chat.is_deck_creation_request(submitted):
                         created = chat.create_deck(
                             submitted, self.saved_decks(), self.current_deck_cards(display=True), architect,
