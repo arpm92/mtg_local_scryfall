@@ -1,4 +1,5 @@
 import csv
+import base64
 import json
 import tempfile
 import unittest
@@ -181,6 +182,68 @@ class CollectionWebTests(unittest.TestCase):
                 self.assertTrue(result["deck"]["validation"]["valid"])
                 self.assertTrue(Path(result["files"]["json"]).is_file())
                 self.assertTrue(Path(result["files"]["forge"]).is_file())
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=2)
+
+    def test_bulk_and_deck_imports_update_collection_and_deck_reservations(self):
+        csv_path = self.root / "collection.csv"
+        with csv_path.open("w", encoding="utf-8-sig", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=["Name", "Oracle Name", "Quantity", "Set code", "Scryfall Oracle ID"])
+            writer.writeheader()
+            writer.writerow({"Name": "Test Card", "Oracle Name": "Test Card", "Quantity": "1",
+                             "Set code": "TST", "Scryfall Oracle ID": "oracle-test"})
+        cache = self.root / "cache"
+        cache.mkdir()
+        bulk = cache / "oracle_cards.json"
+        bulk.write_text(json.dumps([{
+            "name": "Test Card", "oracle_id": "oracle-test", "id": "printing-test",
+            "mana_cost": "{U}", "cmc": 1, "colors": ["U"], "color_identity": ["U"],
+            "type_line": "Creature — Test", "oracle_text": "A test card.",
+            "legalities": {"commander": "legal"},
+        }]), encoding="utf-8")
+        payload = web.load_collection(csv_path, cache)
+        store = web.CollectionImportStore(self.root / "outputs" / "imports.json")
+
+        with patch.object(web, "ROOT", self.root):
+            server = ThreadingHTTPServer(("127.0.0.1", 0), web.make_handler(
+                payload, import_store=store, collection_csv=csv_path, bulk_path=bulk, cache_dir=cache
+            ))
+            thread = Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            base = "http://127.0.0.1:{}".format(server.server_port)
+            try:
+                for upload in (
+                    {"mode": "bulk", "deckName": "", "csv": b"Name,Quantity,Set code\nTest Card,2,TST\n"},
+                    {"mode": "deck", "deckName": "Friday Deck", "csv": b"Name,Quantity,Set code\nTest Card,1,TST\n"},
+                ):
+                    body = json.dumps({
+                        "mode": upload["mode"], "deckName": upload["deckName"],
+                        "csvBase64": base64.b64encode(upload["csv"]).decode("ascii"),
+                    }).encode("utf-8")
+                    request = Request(base + "/api/import", data=body, headers={"Content-Type": "application/json"})
+                    with urlopen(request) as response:
+                        self.assertEqual(response.status, 201)
+                with urlopen(base + "/api/collection") as response:
+                    collection = json.loads(response.read())
+                card = collection["cards"][0]
+                self.assertEqual(collection["summary"]["rows"], 3)
+                self.assertEqual(card["quantity"], 4)
+                self.assertEqual(card["availability"]["reserved"], 1)
+                self.assertEqual(card["availability"]["available"], 3)
+                with urlopen(base + "/api/decks") as response:
+                    self.assertEqual(json.loads(response.read())[0]["format"], "scanned")
+
+                body = json.dumps({"name": "Friday Deck", "format": "scanned"}).encode("utf-8")
+                request = Request(base + "/api/decks", data=body, method="DELETE",
+                                  headers={"Content-Type": "application/json"})
+                with urlopen(request) as response:
+                    self.assertTrue(json.loads(response.read())["removed"])
+                with urlopen(base + "/api/collection") as response:
+                    card = json.loads(response.read())["cards"][0]
+                self.assertEqual(card["quantity"], 4, "deleting a scan deck must retain owned cards")
+                self.assertEqual(card["availability"]["available"], 4)
             finally:
                 server.shutdown()
                 server.server_close()

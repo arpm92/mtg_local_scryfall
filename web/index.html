@@ -36,6 +36,7 @@
           <kbd>/</kbd>
         </label>
         <button id="clear" class="subtle-button" type="button">Clear</button>
+        <button id="open-import" class="primary-button" type="button">Import ManaBox CSV</button>
       </div>
 
       <div class="filters">
@@ -81,7 +82,7 @@
         <section class="deck-editor">
           <div class="deck-toolbar">
             <label>Name<input id="deck-name" value="New Deck" maxlength="100"></label>
-            <label>Format<select id="deck-format"><option value="commander">Commander</option><option value="pauper">Pauper</option><option value="standard">Standard</option></select></label>
+            <label>Format<select id="deck-format"><option value="commander">Commander</option><option value="pauper">Pauper</option><option value="standard">Standard</option><option value="scanned">Scanned deck</option></select></label>
             <div class="deck-view-switch" aria-label="Deck display">
               <button class="active" type="button" data-deck-view="grid" aria-pressed="true">Cards</button>
               <button type="button" data-deck-view="list" aria-pressed="false">List</button>
@@ -119,6 +120,21 @@
   <dialog id="card-dialog">
     <button class="dialog-close" type="button" aria-label="Close">×</button>
     <div id="dialog-content"></div>
+  </dialog>
+
+  <dialog id="import-dialog" class="import-dialog">
+    <button id="close-import" class="dialog-close" type="button" aria-label="Close">×</button>
+    <form id="import-form" class="import-form">
+      <p class="eyebrow">Collection update</p>
+      <h2>Import ManaBox CSV</h2>
+      <p class="muted">The original CSV stays unchanged. Cards are matched against the local Scryfall database.</p>
+      <label>Import type<select id="import-mode"><option value="bulk">Bulk scan — add copies to collection</option><option value="deck">Deck scan — add copies and reserve them</option></select></label>
+      <label id="import-deck-name-wrap" hidden>Deck name<input id="import-deck-name" maxlength="100" placeholder="e.g. Friday Night Standard"></label>
+      <label>ManaBox CSV<input id="import-file" type="file" accept=".csv,text/csv" required></label>
+      <p id="import-status" class="import-status" role="status"></p>
+      <div id="import-unmatched" class="import-unmatched"></div>
+      <div class="import-actions"><button id="cancel-import" class="subtle-button" type="button">Cancel</button><button id="submit-import" class="primary-button" type="submit">Analyze &amp; import</button></div>
+    </form>
   </dialog>
 
   <script src="/app.js" defer></script>

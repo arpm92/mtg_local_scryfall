@@ -1,4 +1,4 @@
-const state = { all: [], filtered: [], visible: 60, formats: {}, savedDecks: [], chatMessages: [], chatAvailable: false, deckView: 'grid', deckInfo: null, deck: {main: {}, sideboard: {}, commanders: {}} };
+const state = { all: [], filtered: [], visible: 60, formats: {}, savedDecks: [], chatMessages: [], chatAvailable: false, deckView: 'grid', deckInfo: null, reservationDeck: null, deck: {main: {}, sideboard: {}, commanders: {}} };
 const $ = (selector) => document.querySelector(selector);
 const grid = $('#card-grid');
 const search = $('#search');
@@ -139,9 +139,12 @@ function render() {
 function openCard(index) {
   const card = state.all.find(item => item.index === index); if (!card) return;
   const tags = [card.rarity, card.foil, card.language, `MV ${card.manaValue}`, card.commander === 'legal' ? 'Commander legal' : 'Not Commander legal'].filter(Boolean);
+  const availability = card.availability || {totalOwned: card.quantity, reserved: 0, available: card.quantity, shortage: 0, reservedByDeck: []};
+  const reservations = availability.reservedByDeck.map(item => `<li><span>${escapeHtml(item.name)}</span><b>${item.quantity} reserved</b></li>`).join('');
+  const availabilityView = `<section class="card-availability"><h3>Copy availability</h3><p><strong>${availability.available}</strong> available · ${availability.reserved} reserved · ${availability.totalOwned} owned</p>${availability.shortage ? `<p class="availability-warning">${availability.shortage} more reserved than owned</p>` : ''}${reservations ? `<ul>${reservations}</ul>` : '<p class="muted">No saved deck reserves this card.</p>'}</section>`;
   const art = card.imageUrl ? `<img src="${escapeHtml(card.imageUrl)}" alt="${escapeHtml(card.name)}">` : '<div class="dialog-art-placeholder"></div>';
-  const rows = card.printings.map(p => `<tr><td>${p.imageUrl ? `<a class="printing-image-link" href="${escapeHtml(p.scryfallUrl || p.imageUrl)}" target="_blank" rel="noopener" title="Open this exact printing"><img class="printing-image" src="${escapeHtml(p.imageUrl)}" alt="${escapeHtml(card.name)} ${escapeHtml(p.setCode)} printing" loading="lazy"></a>` : ''}</td><td>${escapeHtml(p.setCode.toUpperCase())} #${escapeHtml(p.collectorNumber)}</td><td>${escapeHtml(p.rarity)}</td><td>${escapeHtml(p.foil || 'normal')}</td><td>${escapeHtml(p.language)}</td><td>?${p.quantity}</td></tr>`).join('');
-  $('#dialog-content').innerHTML = `<div class="dialog-layout">${art}<div class="dialog-copy"><h2>${escapeHtml(card.name)}</h2><p class="dialog-meta">${card.printings.length} owned printing${card.printings.length === 1 ? '' : 's'} · ${card.quantity} copies</p><p>${escapeHtml(card.manaCost)}</p><p class="dialog-type">${escapeHtml(card.typeLine)}</p><p class="dialog-rules">${escapeHtml(card.oracleText) || '<i>No rules text</i>'}</p><div class="dialog-tags">${tags.map(x => `<span>${escapeHtml(x)}</span>`).join('')}</div><h3 class="printing-title">Owned printings</h3><table class="printing-list"><thead><tr><th>Art</th><th>Printing</th><th>Rarity</th><th>Finish</th><th>Lang</th><th>Qty</th></tr></thead><tbody>${rows}</tbody></table>${card.scryfallUrl ? `<p><a class="scryfall-link" href="${escapeHtml(card.scryfallUrl)}" target="_blank" rel="noopener">Open on Scryfall ↗</a></p>` : ''}</div></div>`;
+  const rows = card.printings.map(p => `<tr><td>${p.imageUrl ? `<a class="printing-image-link" href="${escapeHtml(p.scryfallUrl || p.imageUrl)}" target="_blank" rel="noopener" title="Open this exact printing"><img class="printing-image" src="${escapeHtml(p.imageUrl)}" alt="${escapeHtml(card.name)} ${escapeHtml(p.setCode)} printing" loading="lazy"></a>` : ''}</td><td>${escapeHtml(p.setCode.toUpperCase())} #${escapeHtml(p.collectorNumber)}</td><td>${escapeHtml(p.rarity)}</td><td>${escapeHtml(p.foil || 'normal')}</td><td>${escapeHtml(p.language)}</td><td>&times;${p.quantity}</td></tr>`).join('');
+  $('#dialog-content').innerHTML = `<div class="dialog-layout">${art}<div class="dialog-copy"><h2>${escapeHtml(card.name)}</h2><p class="dialog-meta">${card.printings.length} owned printing${card.printings.length === 1 ? '' : 's'} · ${card.quantity} copies</p><p>${escapeHtml(card.manaCost)}</p><p class="dialog-type">${escapeHtml(card.typeLine)}</p><p class="dialog-rules">${escapeHtml(card.oracleText) || '<i>No rules text</i>'}</p><div class="dialog-tags">${tags.map(x => `<span>${escapeHtml(x)}</span>`).join('')}</div>${availabilityView}<h3 class="printing-title">Owned printings</h3><table class="printing-list"><thead><tr><th>Art</th><th>Printing</th><th>Rarity</th><th>Finish</th><th>Lang</th><th>Qty</th></tr></thead><tbody>${rows}</tbody></table>${card.scryfallUrl ? `<p><a class="scryfall-link" href="${escapeHtml(card.scryfallUrl)}" target="_blank" rel="noopener">Open on Scryfall ↗</a></p>` : ''}</div></div>`;
   $('#card-dialog').showModal();
 }
 
@@ -153,6 +156,55 @@ grid.addEventListener('click', event => { const button = event.target.closest('[
 $('.dialog-close').addEventListener('click', () => $('#card-dialog').close());
 $('#card-dialog').addEventListener('click', event => { if (event.target === $('#card-dialog')) $('#card-dialog').close(); });
 document.addEventListener('keydown', event => { if (event.key === '/' && document.activeElement !== search) { event.preventDefault(); search.focus(); } });
+
+const importDialog = $('#import-dialog');
+function setImportMode() { $('#import-deck-name-wrap').hidden = $('#import-mode').value !== 'deck'; }
+$('#open-import').addEventListener('click', () => { setImportMode(); $('#import-status').textContent = ''; $('#import-unmatched').innerHTML = ''; importDialog.showModal(); });
+$('#close-import').addEventListener('click', () => importDialog.close());
+$('#cancel-import').addEventListener('click', () => importDialog.close());
+$('#import-mode').addEventListener('change', setImportMode);
+async function fileAsBase64(file) {
+  const bytes = new Uint8Array(await file.arrayBuffer()); let binary = '';
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+  }
+  return btoa(binary);
+}
+$('#import-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const file = $('#import-file').files[0]; const mode = $('#import-mode').value;
+  const deckName = $('#import-deck-name').value.trim(); const status = $('#import-status');
+  $('#import-unmatched').innerHTML = '';
+  if (!file) { status.textContent = 'Choose a ManaBox CSV first.'; return; }
+  if (file.size > 14 * 1024 * 1024) { status.textContent = 'Choose a CSV smaller than 14 MB.'; return; }
+  if (mode === 'deck' && !deckName) { status.textContent = 'Enter a name for this scanned deck.'; return; }
+  const submit = $('#submit-import'); submit.disabled = true; submit.textContent = 'Analyzing…';
+  status.textContent = 'Reading the CSV and matching cards against the local Scryfall database…';
+  try {
+    const response = await fetch('/api/import', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({mode, deckName, csvBase64: await fileAsBase64(file)})
+    });
+    const result = await response.json();
+    if (!response.ok) {
+      status.textContent = result.error || 'The CSV could not be imported.';
+      if (result.unmatched?.length) $('#import-unmatched').innerHTML = `<h3>Cards needing review</h3><ul>${result.unmatched.map(item => `<li><b>${escapeHtml(item['Card Name'])}</b> — ${escapeHtml(item.Reason)}</li>`).join('')}</ul>`;
+      return;
+    }
+    const summary = result.summary;
+    status.textContent = `${result.added ? result.message : 'This exact CSV was already imported.'} ${summary.rows} rows · ${summary.matched_rows} matched · ${summary.unmatched_rows} unmatched · ${summary.copies} copies.`;
+    if (result.unmatched?.length) $('#import-unmatched').innerHTML = `<h3>Unmatched cards</h3><ul>${result.unmatched.map(item => `<li><b>${escapeHtml(item['Card Name'])}</b> — ${escapeHtml(item.Reason)}</li>`).join('')}</ul>`;
+    if (result.added) {
+      await reloadCollection();
+      state.savedDecks = await fetch('/api/decks', {cache: 'no-store'}).then(r => r.json());
+      renderSavedDecks(); renderDeckBuilder();
+    }
+  } catch (error) {
+    status.textContent = `Import failed: ${error.message}`;
+  } finally {
+    submit.disabled = false; submit.textContent = 'Analyze & import';
+  }
+});
 document.querySelectorAll('[data-tab]').forEach(button => button.addEventListener('click', () => {
   const tab = button.dataset.tab;
   document.querySelectorAll('[data-tab]').forEach(item => {
@@ -166,20 +218,36 @@ document.querySelectorAll('[data-tab]').forEach(button => button.addEventListene
   $('#header-stats').hidden = tab !== 'collection';
 }));
 
-fetch('/api/collection').then(response => {
+async function reloadCollection() {
+  const response = await fetch('/api/collection', {cache: 'no-store'});
   if (!response.ok) throw new Error(`Server returned ${response.status}`);
-  return response.json();
-}).then(data => {
+  const data = await response.json();
   state.all = data.cards.map(card => ({...card, _search: normalize([card.name, card.typeLine, card.oracleText, card.setNames.join(' '), card.setCodes.join(' '), card.keywords].join(' '))}));
   $('#source-name').textContent = data.source;
   $('#loading').hidden = true;
+  $('#color-filter').innerHTML = '<option value="">Any color</option>';
+  $('#type-filter').innerHTML = '<option value="">Any type</option>';
+  $('#set-filter').innerHTML = '<option value="">Any set</option>';
+  $('#rarity-filter').innerHTML = '<option value="">Any rarity</option>';
+  $('#foil-filter').innerHTML = '<option value="">Any finish</option>';
   populateFilters(); applyFilters();
-}).catch(error => { $('#loading').textContent = `Could not load collection: ${error.message}`; });
+  return data;
+}
+reloadCollection().catch(error => { $('#loading').textContent = `Could not load collection: ${error.message}`; });
 
 function deckTotal(section) { return Object.values(state.deck[section]).reduce((sum, count) => sum + count, 0); }
 function ownedInDeck(name) { return ['main', 'sideboard', 'commanders'].reduce((sum, section) => sum + (state.deck[section][name] || 0), 0); }
 function legalForFormat(card, format) { return card.legalities?.[format] === 'legal' || /^Basic Land/.test(card.typeLine); }
-function maxCopies(card, format) { return format === 'commander' ? 1 : Math.min(4, card.quantity); }
+function availableToCurrentDeck(card) {
+  const owned = Number(card.availability?.totalOwned ?? card.quantity) || 0;
+  let reserved = Number(card.availability?.reserved || 0);
+  if (state.reservationDeck && state.reservationDeck.format === $('#deck-format').value) {
+    const own = (card.availability?.reservedByDeck || []).find(item => item.name === state.reservationDeck.name);
+    reserved -= Number(own?.quantity || 0);
+  }
+  return Math.max(0, owned - reserved);
+}
+function maxCopies(card, format) { const available = availableToCurrentDeck(card); return format === 'commander' ? Math.min(1, available) : Math.min(4, available); }
 function addToDeck(name, section) {
   const card = state.all.find(item => item.name === name); const format = $('#deck-format').value;
   if (!card || !legalForFormat(card, format)) return;
@@ -203,10 +271,11 @@ function deckVisualCard(name, count, section) {
     ? `<img src="${escapeHtml(card.imageUrl)}" alt="${escapeHtml(name)}" loading="lazy">`
     : `<span class="deck-art-fallback">${escapeHtml(name)}</span>`;
   const preview = card ? `data-preview-index="${card.index}"` : '';
+  const actions = state.deckInfo?.format === 'scanned' ? '' : `<span class="deck-card-actions"><button type="button" data-remove="${section}" data-card="${escapeHtml(name)}" aria-label="Remove ${escapeHtml(name)}">−</button><button type="button" data-add="${section}" data-card="${escapeHtml(name)}" aria-label="Add another ${escapeHtml(name)}">+</button></span>`;
   return `<article class="deck-visual-card">
     <span class="deck-qty">${count}×</span>
     <button class="deck-card-art" type="button" ${preview} aria-label="View ${escapeHtml(name)}">${art}</button>
-    <span class="deck-card-actions"><button type="button" data-remove="${section}" data-card="${escapeHtml(name)}" aria-label="Remove ${escapeHtml(name)}">−</button><button type="button" data-add="${section}" data-card="${escapeHtml(name)}" aria-label="Add another ${escapeHtml(name)}">+</button></span>
+    ${actions}
     <span class="deck-visual-name" title="${escapeHtml(name)}">${escapeHtml(name)}</span>
   </article>`;
 }
@@ -260,8 +329,12 @@ function renderDeckPrimer() {
     <p><strong>Winning conditions</strong></p><div class="primer-wins">${wins.length ? wins.map(name => `<span>${escapeHtml(name)}</span>`).join('') : '<span>No distinct finishers detected</span>'}</div>`;
 }
 function renderDeckBuilder() {
-  const format = $('#deck-format').value; const config = state.formats[format]; if (!config) return;
-  $('#commander-section').hidden = format !== 'commander'; $('#sideboard-section').hidden = format === 'commander';
+  const format = $('#deck-format').value; const scanned = format === 'scanned';
+  const config = state.formats[format] || {main_size: 0, sideboard_target: 0, commander_min: 0};
+  $('#deck-name').readOnly = scanned; $('#deck-format').disabled = scanned; $('#save-deck').disabled = scanned;
+  document.querySelector('.available-cards').hidden = scanned;
+  $('#commander-section').hidden = format !== 'commander'; $('#sideboard-section').hidden = format === 'commander' || scanned;
+  if (scanned) $('#deck-status').textContent = 'Scanned deck · unclassified · card copies reserved in your collection.';
   $('#commander-total').textContent = `${deckTotal('commanders')} / ${config.commander_min || 0}`;
   $('#main-total').textContent = `${deckTotal('main')} / ${config.main_size}`;
   $('#sideboard-total').textContent = `${deckTotal('sideboard')} / ${config.sideboard_target}`;
@@ -274,12 +347,12 @@ function renderDeckBuilder() {
   $('#deck-summary').innerHTML = `<span><strong>${deckTotal('main') + deckTotal('commanders')}</strong> deck cards</span><span><strong>${Object.keys(state.deck.main).length}</strong> unique main</span><span><strong>${creatures}</strong> creatures</span><span><strong>${lands}</strong> lands</span><span><strong>${averageMv.toFixed(2)}</strong> avg. mana value</span>`;
   renderDeckPrimer();
   const query = normalize($('#deck-search').value);
-  const available = state.all.filter(card => legalForFormat(card, format) && (!query || card._search.includes(query))).slice(0, 150);
+  const available = scanned ? [] : state.all.filter(card => legalForFormat(card, format) && (!query || card._search.includes(query))).slice(0, 150);
   $('#deck-card-list').innerHTML = available.map(card => {
     const remaining = Math.max(0, maxCopies(card, format) - ownedInDeck(card.name));
     const commanderButton = format === 'commander' && card.commanderCandidate ? `<button data-add="commanders" data-card="${escapeHtml(card.name)}" ${remaining ? '' : 'disabled'} title="Add commander">C</button>` : '';
     const thumb = card.imageUrl ? `<button class="deck-card-art" type="button" data-preview-index="${card.index}" aria-label="View ${escapeHtml(card.name)}"><img class="deck-card-thumb" src="${escapeHtml(card.imageUrl)}" alt="" loading="lazy"></button>` : '<span class="deck-card-thumb"></span>';
-    return `<div class="deck-card-row">${thumb}<span><b>${escapeHtml(card.name)}</b><small>${escapeHtml(card.typeLine)} · ${remaining}/${card.quantity} available</small></span><span class="deck-adds">${commanderButton}<button data-add="main" data-card="${escapeHtml(card.name)}" ${remaining ? '' : 'disabled'} title="Add to main">+</button>${format !== 'commander' ? `<button data-add="sideboard" data-card="${escapeHtml(card.name)}" ${remaining ? '' : 'disabled'} title="Add to sideboard">S</button>` : ''}</span></div>`;
+    return `<div class="deck-card-row">${thumb}<span><b>${escapeHtml(card.name)}</b><small>${escapeHtml(card.typeLine)} · ${remaining}/${availableToCurrentDeck(card)} available</small></span><span class="deck-adds">${commanderButton}<button data-add="main" data-card="${escapeHtml(card.name)}" ${remaining ? '' : 'disabled'} title="Add to main">+</button>${format !== 'commander' ? `<button data-add="sideboard" data-card="${escapeHtml(card.name)}" ${remaining ? '' : 'disabled'} title="Add to sideboard">S</button>` : ''}</span></div>`;
   }).join('') || '<p class="muted">No owned legal cards match.</p>';
   document.querySelectorAll('[data-deck-section]').forEach(container => {
     const section = container.dataset.deckSection;
@@ -287,24 +360,31 @@ function renderDeckBuilder() {
   });
   renderTokens();
 }
-function newDeck() { state.deckInfo = null; state.deck = {main: {}, sideboard: {}, commanders: {}}; $('#deck-name').value = 'New Deck'; $('#deck-status').textContent = ''; renderDeckBuilder(); }
-function loadSavedDeck(deck) { state.deckInfo = deck; state.deck = {main: {...deck.main}, sideboard: {...(deck.sideboard || {})}, commanders: {...(deck.commanders || {})}}; $('#deck-name').value = deck.name; $('#deck-format').value = deck.format; $('#chat-deck').value = deck.name; renderDeckBuilder(); }
+function newDeck() { state.deckInfo = null; state.reservationDeck = null; if ($('#deck-format').value === 'scanned') $('#deck-format').value = 'commander'; state.deck = {main: {}, sideboard: {}, commanders: {}}; $('#deck-name').value = 'New Deck'; $('#deck-status').textContent = ''; renderDeckBuilder(); }
+function loadSavedDeck(deck) { state.deckInfo = deck; state.reservationDeck = deck.format === 'scanned' ? null : {name: deck.name, format: deck.format}; state.deck = {main: {...deck.main}, sideboard: {...(deck.sideboard || {})}, commanders: {...(deck.commanders || {})}}; $('#deck-name').value = deck.name; $('#deck-format').value = deck.format; $('#chat-deck').value = deck.name; renderDeckBuilder(); }
 function renderSavedDecks() {
   $('#deck-count').textContent = `${state.savedDecks.length} saved deck${state.savedDecks.length === 1 ? '' : 's'}`;
-  $('#saved-decks').innerHTML = state.savedDecks.map((deck,index) => `<div class="saved-deck-row"><button class="saved-deck" data-saved="${index}">${escapeHtml(deck.name)}<small>${escapeHtml(deck.format)}</small></button><button class="delete-deck" type="button" data-delete-deck="${index}" aria-label="Delete ${escapeHtml(deck.name)}" title="Delete deck">×</button></div>`).join('') || '<p class="muted">No saved decks yet.</p>';
+  $('#saved-decks').innerHTML = state.savedDecks.map((deck,index) => `<div class="saved-deck-row"><button class="saved-deck" data-saved="${index}">${escapeHtml(deck.name)}<small>${deck.format === 'scanned' ? 'Scanned deck · unclassified' : escapeHtml(deck.format)}</small></button><button class="delete-deck" type="button" data-delete-deck="${index}" aria-label="Delete ${escapeHtml(deck.name)}" title="Delete deck">×</button></div>`).join('') || '<p class="muted">No saved decks yet.</p>';
   const picker = $('#chat-deck'); const selected = picker.value;
   picker.innerHTML = '<option value="">Collection / general question</option>' + state.savedDecks.map(deck => `<option value="${escapeHtml(deck.name)}">${escapeHtml(deck.name)} (${escapeHtml(deck.format)})</option>`).join('');
   if (state.savedDecks.some(deck => deck.name === selected)) picker.value = selected;
 }
 async function deleteDeck(index) {
   const deck = state.savedDecks[index]; if (!deck) return;
-  if (!window.confirm(`Delete “${deck.name}”? Its files will be moved to outputs/.trash and can be recovered.`)) return;
+  const prompt = deck.format === 'scanned'
+    ? `Remove the reservation for “${deck.name}”? Its scanned cards will remain in your collection.`
+    : `Delete “${deck.name}”? Its files will be moved to outputs/.trash and can be recovered.`;
+  if (!window.confirm(prompt)) return;
   const response = await fetch('/api/decks', {method: 'DELETE', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name: deck.name, format: deck.format})});
   const result = await response.json();
   if (!response.ok) { $('#deck-status').className = 'deck-status error'; $('#deck-status').textContent = result.error || 'Could not delete deck.'; return; }
   if (state.deckInfo?.name === deck.name && state.deckInfo?.format === deck.format) newDeck();
-  state.savedDecks = await fetch('/api/decks').then(r => r.json()); renderSavedDecks();
-  $('#deck-status').className = 'deck-status success'; $('#deck-status').textContent = `Deleted “${deck.name}”. Files moved to outputs/.trash.`;
+  await reloadCollection();
+  state.savedDecks = await fetch('/api/decks').then(r => r.json()); renderSavedDecks(); renderDeckBuilder();
+  $('#deck-status').className = 'deck-status success';
+  $('#deck-status').textContent = deck.format === 'scanned'
+    ? `Removed the reservation for “${deck.name}”. Its cards remain in your collection.`
+    : `Deleted “${deck.name}”. Files moved to outputs/.trash.`;
 }
 async function saveDeck() {
   const status = $('#deck-status'); status.className = 'deck-status'; status.textContent = 'Validating...';
@@ -313,7 +393,8 @@ async function saveDeck() {
     const response = await fetch('/api/decks', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)});
     const result = await response.json();
     if (!response.ok) throw new Error((result.validation?.errors || [result.error]).join(' '));
-    state.deckInfo = result.deck; renderDeckBuilder(); status.classList.add('success'); status.textContent = `Saved and exported to outputs/${payload.format}.`;
+    state.deckInfo = result.deck; state.reservationDeck = {name: result.deck.name, format: result.deck.format};
+    await reloadCollection(); renderDeckBuilder(); status.classList.add('success'); status.textContent = `Saved and exported to outputs/${payload.format}.`;
     state.savedDecks = await fetch('/api/decks').then(r => r.json()); renderSavedDecks();
   } catch (error) { status.classList.add('error'); status.textContent = error.message; }
 }
@@ -360,8 +441,10 @@ $('#chat-form').addEventListener('submit', async event => {
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || `Server returned ${response.status}`);
     if (result.deck) {
+      await reloadCollection();
       state.savedDecks = await fetch('/api/decks', {cache: 'no-store'}).then(r => r.json());
       renderSavedDecks();
+      renderDeckBuilder();
       $('#chat-deck').value = result.deck.name;
     }
     state.chatMessages.push({role: 'assistant', content: result.answer}); renderChat();

@@ -74,6 +74,7 @@ class CodexChat:
         instructions = (
             "You are the MTG deck assistant inside a private collection web app. "
             "Use the supplied saved_decks card lists and owned-card facts for collection claims. "
+            "For available copies, use each card's availability totals and per-deck reservations; quantity is total owned. "
             "Do not invent ownership, Oracle text, legality, deck contents, or rules. Say when evidence is absent. "
             "When asked whether several saved decks can be built at once, compare their combined demand across main decks, sideboards, and commanders against owned quantities. "
             "The supplied combined_collection_demand is a deterministic count; report its shortages exactly. Never claim separate deck validation proves simultaneous ownership. "
@@ -385,7 +386,7 @@ class CodexChat:
                 seen.add(key)
                 selected.append({key: card.get(key) for key in (
                     "name", "quantity", "manaCost", "manaValue", "colors", "colorIdentity",
-                    "typeLine", "oracleText", "keywords", "producedMana", "legalities", "commander"
+                    "typeLine", "oracleText", "keywords", "producedMana", "legalities", "commander", "availability"
                 )})
         return selected
 

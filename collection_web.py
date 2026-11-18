@@ -3,6 +3,7 @@
 
 import argparse
 import base64
+import csv
 import hmac
 import importlib.util
 import json
@@ -10,12 +11,15 @@ import os
 import re
 import shutil
 import sys
+import tempfile
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
 from enrich_mtg_collection import iter_oracle_cards, read_csv
+from collection_allocation import annotate_card_availability, summarize_allocations
+from collection_import import CollectionImportStore, prepare_upload
 
 
 ROOT = Path(__file__).resolve().parent
@@ -54,6 +58,36 @@ def choose_bulk_file(cache_dir):
         cache_dir / "oracle_cards.json",
     ]
     return next((path for path in candidates if path.is_file()), None)
+
+
+def materialize_imported_collection(source_csv, extra_rows, output_dir):
+    """Build a separate runtime CSV containing source rows plus saved imports."""
+    source_csv = Path(source_csv)
+    extra_rows = list(extra_rows or [])
+    if not extra_rows:
+        return source_csv
+    fields, source_rows, _, _ = read_csv(source_csv)
+    for row in extra_rows:
+        for field in row:
+            if field not in fields:
+                fields.append(field)
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    target = output_dir / ".collection_with_imports.csv"
+    fd, temp_name = tempfile.mkstemp(prefix=".collection_with_imports.", suffix=".tmp", dir=str(output_dir))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8-sig", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=fields, extrasaction="ignore")
+            writer.writeheader()
+            writer.writerows(source_rows)
+            writer.writerows(extra_rows)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_name, target)
+    finally:
+        if os.path.exists(temp_name):
+            os.remove(temp_name)
+    return target
 
 
 def card_images(card):
@@ -296,8 +330,12 @@ def archive_saved_deck(format_name, deck_name, outputs_root=ROOT / "outputs"):
     return {"name": deck_name, "format": format_name, "trash": str(destination), "moved": moved}
 
 
-def make_handler(payload, architect=None, engine_cards=None, auth_username="", auth_password="", chat=None):
-    api_body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+def make_handler(payload, architect=None, engine_cards=None, auth_username="", auth_password="", chat=None,
+                 import_store=None, collection_csv=None, bulk_path=None, cache_dir=DEFAULT_CACHE):
+    import_store = import_store or CollectionImportStore(ROOT / "outputs" / "collection_imports.json")
+    collection_csv = Path(collection_csv or DEFAULT_COLLECTION)
+    bulk_path = Path(bulk_path) if bulk_path else choose_bulk_file(cache_dir)
+    state = {"payload": payload, "engine_cards": engine_cards}
     static_routes = {
         "/": ("index.html", "text/html; charset=utf-8"),
         "/index.html": ("index.html", "text/html; charset=utf-8"),
@@ -306,6 +344,25 @@ def make_handler(payload, architect=None, engine_cards=None, auth_username="", a
     }
 
     class CollectionHandler(BaseHTTPRequestHandler):
+        def refresh_collection(self):
+            runtime_csv = materialize_imported_collection(
+                collection_csv, import_store.imported_rows(), ROOT / "outputs"
+            )
+            current_payload = load_collection(runtime_csv, cache_dir)
+            current_payload["source"] = collection_csv.name
+            current_engine_cards = architect.load_collection(runtime_csv, bulk_path) if architect else []
+            state["payload"] = current_payload
+            state["engine_cards"] = current_engine_cards
+
+        def current_deck_cards(self, exclude_name=None, exclude_format=None, display=False):
+            decks = [deck for deck in self.saved_decks() if not (
+                exclude_name and str(deck.get("name") or "").casefold() == str(exclude_name).casefold()
+                and (not exclude_format or deck.get("format") == exclude_format)
+            )]
+            source_cards = state["payload"]["cards"] if display else state["engine_cards"]
+            available = annotate_card_availability(source_cards, decks)
+            return [dict(card, quantity=card["availability"]["available"]) for card in available]
+
         def authorized(self):
             if not auth_password:
                 return True
@@ -351,6 +408,7 @@ def make_handler(payload, architect=None, engine_cards=None, auth_username="", a
                             result.append(deck)
                     except (OSError, ValueError):
                         continue
+            result.extend(import_store.scanned_decks())
             return result
 
         def do_GET(self):
@@ -365,12 +423,9 @@ def make_handler(payload, architect=None, engine_cards=None, auth_username="", a
                 self.send_json(200, {"ok": True})
                 return
             if path == "/api/collection":
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json; charset=utf-8")
-                self.send_header("Content-Length", str(len(api_body)))
-                self.send_header("Cache-Control", "no-store")
-                self.end_headers()
-                self.wfile.write(api_body)
+                current = dict(state["payload"])
+                current["cards"] = annotate_card_availability(current.get("cards", []), self.saved_decks())
+                self.send_json(200, current)
                 return
             if path == "/api/formats":
                 values = {}
@@ -404,33 +459,66 @@ def make_handler(payload, architect=None, engine_cards=None, auth_username="", a
             path = urlparse(self.path).path
             if not self.authorized():
                 return
-            if path not in ("/api/decks", "/api/chat"):
+            if path not in ("/api/decks", "/api/chat", "/api/import"):
                 self.send_error(404, "Not found")
                 return
             try:
                 length = int(self.headers.get("Content-Length", "0"))
-                if length <= 0 or length > (200_000 if path == "/api/chat" else 2_000_000):
+                limits = {"/api/chat": 200_000, "/api/decks": 2_000_000, "/api/import": 20_000_000}
+                if length <= 0 or length > limits[path]:
                     raise ValueError("Invalid request size.")
                 submitted = json.loads(self.rfile.read(length).decode("utf-8"))
+                if path == "/api/import":
+                    encoded = submitted.get("csvBase64")
+                    if not isinstance(encoded, str) or len(encoded) > 19_000_000:
+                        raise ValueError("Choose a ManaBox CSV smaller than 14 MB.")
+                    try:
+                        csv_bytes = base64.b64decode(encoded, validate=True)
+                    except (ValueError, base64.binascii.Error) as error:
+                        raise ValueError("The uploaded CSV data is invalid.") from error
+                    prepared = prepare_upload(
+                        csv_bytes, bulk_path, submitted.get("mode"), submitted.get("deckName")
+                    )
+                    if prepared["mode"] == "deck" and not prepared["can_create_deck"]:
+                        self.send_json(422, {
+                            "error": "Deck scan was not saved because one or more cards could not be matched.",
+                            "summary": prepared["summary"], "unmatched": prepared["unmatched"],
+                        })
+                        return
+                    result = import_store.add(prepared)
+                    if result["added"]:
+                        self.refresh_collection()
+                    self.send_json(201 if result["added"] else 200, {
+                        "added": result["added"], "mode": prepared["mode"],
+                        "summary": prepared["summary"], "unmatched": prepared["unmatched"],
+                        "deck": prepared.get("deck"),
+                        "message": ("Imported into collection." if prepared["mode"] == "bulk"
+                                    else "Deck scan imported and card copies reserved."),
+                    })
+                    return
                 if path == "/api/chat":
                     if not chat:
                         self.send_json(503, {"error": "Codex chat is not configured on this server."})
                         return
                     if hasattr(chat, "is_deck_creation_request") and chat.is_deck_creation_request(submitted):
-                        created = chat.create_deck(submitted, self.saved_decks(), payload["cards"], architect, engine_cards)
+                        created = chat.create_deck(
+                            submitted, self.saved_decks(), self.current_deck_cards(display=True), architect, state["engine_cards"]
+                        )
                         if created.get("clarification"):
                             self.send_json(200, {"answer": created["clarification"]})
                             return
                         deck = created["deck"]
-                        validation = architect.validate_deck(deck, engine_cards, deck["format"])
+                        validation = architect.validate_deck(
+                            deck, self.current_deck_cards(deck.get("name"), deck.get("format")), deck["format"]
+                        )
                         if not validation["valid"]:
                             self.send_json(422, {"error": "Generated deck failed validation; it was not saved.", "validation": validation})
                             return
                         deck["validation"] = validation
-                        files = architect.save_bundle(deck, engine_cards, ROOT / "outputs")
+                        files = architect.save_bundle(deck, state["engine_cards"], ROOT / "outputs")
                         self.send_json(201, {"answer": created["answer"], "deck": deck, "files": files})
                         return
-                    answer = chat.ask(submitted, self.saved_decks(), payload["cards"])
+                    answer = chat.ask(submitted, self.saved_decks(), state["payload"]["cards"])
                     self.send_json(200, {"answer": answer})
                     return
                 format_name = str(submitted.get("format") or "").lower()
@@ -449,13 +537,15 @@ def make_handler(payload, architect=None, engine_cards=None, auth_username="", a
                     if not isinstance(deck[section], dict):
                         raise ValueError("Deck sections must be card/count objects.")
                     deck[section] = {str(card): int(count) for card, count in deck[section].items() if int(count) > 0}
-                validation = architect.validate_deck(deck, engine_cards)
+                validation = architect.validate_deck(
+                    deck, self.current_deck_cards(deck["name"], deck["format"])
+                )
                 deck["validation"] = validation
-                deck["report"] = architect.deck_report(deck, engine_cards)
+                deck["report"] = architect.deck_report(deck, state["engine_cards"])
                 if not validation["valid"]:
                     self.send_json(400, {"error": "Deck is not valid.", "validation": validation})
                     return
-                files = architect.save_bundle(deck, engine_cards, ROOT / "outputs")
+                files = architect.save_bundle(deck, state["engine_cards"], ROOT / "outputs")
                 self.send_json(201, {"deck": deck, "files": files})
             except (ValueError, TypeError, UnicodeDecodeError, json.JSONDecodeError) as error:
                 self.send_json(400, {"error": str(error)})
@@ -473,10 +563,9 @@ def make_handler(payload, architect=None, engine_cards=None, auth_username="", a
                 if length <= 0 or length > 100_000:
                     raise ValueError("Invalid request size.")
                 submitted = json.loads(self.rfile.read(length).decode("utf-8"))
-                result = archive_saved_deck(
-                    str(submitted.get("format") or "").lower(),
-                    str(submitted.get("name") or ""),
-                )
+                format_name = str(submitted.get("format") or "").lower()
+                result = (import_store.remove_scanned_deck(str(submitted.get("name") or ""))
+                          if format_name == "scanned" else archive_saved_deck(format_name, str(submitted.get("name") or "")))
                 self.send_json(200, result)
             except LookupError as error:
                 self.send_json(404, {"error": str(error)})
@@ -497,15 +586,22 @@ def main():
     args = parser.parse_args()
     try:
         csv_path = choose_collection(args.csv)
-        payload = load_collection(csv_path)
+        import_store = CollectionImportStore(ROOT / "outputs" / "collection_imports.json")
+        bulk_path = choose_bulk_file(DEFAULT_CACHE)
+        runtime_csv = materialize_imported_collection(
+            csv_path, import_store.imported_rows(), ROOT / "outputs"
+        )
+        payload = load_collection(runtime_csv)
+        payload["source"] = csv_path.name
         architect = load_architect()
-        engine_cards = architect.load_collection(csv_path, choose_bulk_file(DEFAULT_CACHE))
+        engine_cards = architect.load_collection(runtime_csv, bulk_path)
         from codex_chat import CodexChat
         chat = CodexChat.from_environment()
         username = os.environ.get("MTG_WEB_USERNAME", "")
         password = os.environ.get("MTG_WEB_PASSWORD", "")
         server = ThreadingHTTPServer((args.host, args.port), make_handler(
-            payload, architect, engine_cards, username, password, chat
+            payload, architect, engine_cards, username, password, chat,
+            import_store=import_store, collection_csv=csv_path, bulk_path=bulk_path,
         ))
         print("Loaded {:,} cards from {:,} rows / {:,} copies in {}".format(
             payload["summary"]["cards"], payload["summary"]["rows"],
