@@ -377,10 +377,27 @@ class CodexChat:
         sections = {}
         for section in ("main", "sideboard", "commanders"):
             value = plan.get(section) or {}
-            if not isinstance(value, dict):
-                raise ValueError("Codex returned an invalid {} card list.".format(section))
+            if isinstance(value, dict):
+                entries = list(value.items())
+            elif isinstance(value, list):
+                entries = []
+                for item in value:
+                    if isinstance(item, str):
+                        entries.append((item, 1))
+                    elif isinstance(item, dict):
+                        card_name = item.get("name") or item.get("card_name")
+                        count_key = next((key for key in ("count", "quantity", "qty") if key in item), None)
+                        if not isinstance(card_name, str) or not card_name.strip() or count_key is None:
+                            raise ValueError(
+                                "Codex returned an invalid {} card entry; expected a card name and count.".format(section)
+                            )
+                        entries.append((card_name, item[count_key]))
+                    else:
+                        raise ValueError("Codex returned an invalid {} card entry.".format(section))
+            else:
+                raise ValueError("Codex returned an invalid {} card list; expected a name/count object or list.".format(section))
             normalized = {}
-            for raw_name, raw_count in value.items():
+            for raw_name, raw_count in entries:
                 if isinstance(raw_count, bool) or not str(raw_count).isdigit() or int(raw_count) < 1:
                     raise ValueError("Codex returned an invalid card count for {}.".format(raw_name))
                 name = str(raw_name).strip()

@@ -192,7 +192,10 @@ class CodexChatTests(unittest.TestCase):
         full_name = "Blossom-Blessed Angel // Seed Suture"
         response = {
             "name": "Angel Fixture", "archetype": "Angel-focused",
-            "colors": ["W"], "main": {"Blossom-Blessed Angel": 4, "Plains": 56},
+            "colors": ["W"], "main": [
+                {"name": "Blossom-Blessed Angel", "count": 4},
+                {"name": "Plains", "count": 56},
+            ],
             "sideboard": {}, "commanders": {},
             "strategy": "Build a flying board and win through combat damage.",
             "early_game": "Develop mana and prepare the board.",
@@ -256,6 +259,32 @@ class CodexChatTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "ambiguous face name"):
             CodexChat._deck_from_plan(plan, "standard", candidates, [])
+
+    def test_deck_generation_accepts_card_entry_lists_and_aggregates_counts(self):
+        plan = {
+            "name": "List Format Fixture",
+            "main": [
+                {"name": "Owned Sprout", "count": 2},
+                {"card_name": "Owned Sprout", "quantity": 2},
+                {"name": "Forest", "count": 56},
+            ],
+        }
+        candidates = {
+            "owned sprout": {"name": "Owned Sprout"},
+            "forest": {"name": "Forest"},
+        }
+
+        deck, _ = CodexChat._deck_from_plan(plan, "standard", candidates, [])
+
+        self.assertEqual(deck["main"], {"Owned Sprout": 4, "Forest": 56})
+
+    def test_deck_generation_accepts_repeated_card_names_as_single_copies(self):
+        plan = {"name": "Repeated Name Fixture", "main": ["Owned Sprout", "Owned Sprout"]}
+        candidates = {"owned sprout": {"name": "Owned Sprout"}}
+
+        deck, _ = CodexChat._deck_from_plan(plan, "standard", candidates, [])
+
+        self.assertEqual(deck["main"], {"Owned Sprout": 2})
 
     def test_chat_prompt_includes_only_relevant_collection_data_and_saved_deck(self):
         chat = CodexChat(command="python")
