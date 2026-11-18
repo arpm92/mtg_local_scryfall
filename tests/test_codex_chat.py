@@ -24,10 +24,45 @@ class CodexChatTests(unittest.TestCase):
 
     def test_deck_creation_intent_and_format_clarification(self):
         self.assertTrue(CodexChat.is_deck_creation_request({"message": "Create a new Pauper deck with green creatures."}))
+        self.assertTrue(CodexChat.is_deck_creation_request({"message": "I would like a fresh deck based on my collection."}))
+        self.assertTrue(CodexChat.is_deck_creation_request({"message": "I want a deck using Black Widow and green counters."}))
         self.assertFalse(CodexChat.is_deck_creation_request({"message": "How do I build a Pauper deck?"}))
+        self.assertFalse(CodexChat.is_deck_creation_request({"message": "Can you make my current deck better?"}))
         chat = CodexChat(command="python")
         result = chat.create_deck({"message": "Create a new deck"}, [], [], architect, [])
         self.assertIn("Which format", result["clarification"])
+
+    def test_chat_retrieval_keeps_exact_card_name_outside_relevance_limit(self):
+        cards = [
+            {"name": "A distraction {:03d}".format(index), "typeLine": "Creature",
+             "oracleText": "Black Widow appears in this reminder text.", "oracleId": "d{:03d}".format(index)}
+            for index in range(220)
+        ]
+        cards.append({"name": "Black Widow, Deadly Hunter", "oracleId": "black-widow"})
+
+        relevant = CodexChat._relevant_cards("Do I own Black Widow?", None, cards)
+
+        self.assertIn("Black Widow, Deadly Hunter", [card["name"] for card in relevant])
+
+    def test_chat_context_spells_out_partial_card_name_matches(self):
+        chat = CodexChat(command="python")
+        captured = {}
+
+        def fake_turn(instructions, prompt, model=None):
+            captured["instructions"] = instructions
+            captured["prompt"] = prompt
+            return "You own Black Widow, Deadly Hunter."
+
+        chat._turn = fake_turn
+        cards = [
+            {"name": "Black Widow, Deadly Hunter", "quantity": 1, "oracleId": "widow"},
+            {"name": "Origin of Black Widow", "quantity": 1, "oracleId": "origin"},
+        ]
+        chat.ask({"message": "Do I own Black Widow?"}, [], cards)
+        context = json.loads(captured["prompt"].split("Use this supplied application context:\n", 1)[1])
+
+        self.assertEqual([card["name"] for card in context["card_name_matches_from_question"]], ["Black Widow, Deadly Hunter"])
+        self.assertIn("card_name_matches_from_question", captured["instructions"])
 
     def test_created_deck_uses_owned_candidates_and_passes_shared_validation(self):
         chat = CodexChat(command="python")

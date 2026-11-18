@@ -694,9 +694,17 @@ $('#simulation-form').addEventListener('submit', startSimulation);
 $('#saved-decks').addEventListener('click', event => { const remove = event.target.closest('[data-delete-deck]'); const button = event.target.closest('[data-saved]'); if (remove) deleteDeck(Number(remove.dataset.deleteDeck)); else if (button) loadSavedDeck(state.savedDecks[Number(button.dataset.saved)]); });
 function renderChat() {
   const log = $('#chat-messages');
-  log.innerHTML = state.chatMessages.map(item => `<article class="chat-message ${item.role === 'user' ? 'user' : 'assistant'}"><strong>${item.role === 'user' ? 'You' : 'Codex'}</strong><div class="chat-message-body">${item.role === 'assistant' ? renderMarkdown(item.content) : `<p>${escapeHtml(item.content).replace(/\n/g, '<br>')}</p>`}</div></article>`).join('');
+  log.innerHTML = state.chatMessages.map(item => `<article class="chat-message ${item.role === 'user' ? 'user' : 'assistant'}"><strong>${item.role === 'user' ? 'You' : 'Codex'}</strong><div class="chat-message-body">${item.role === 'assistant' ? renderMarkdown(item.content) : `<p>${escapeHtml(item.content).replace(/\n/g, '<br>')}</p>`}</div>${item.savedDeck ? `<button class="chat-open-deck" type="button" data-chat-open-deck="${escapeHtml(item.savedDeck.name)}" data-chat-open-format="${escapeHtml(item.savedDeck.format)}">Open saved deck in Decks</button>` : ''}</article>`).join('');
   log.scrollTop = log.scrollHeight;
 }
+$('#chat-messages').addEventListener('click', event => {
+  const button = event.target.closest('[data-chat-open-deck]');
+  if (!button) return;
+  const deck = state.savedDecks.find(item => item.name === button.dataset.chatOpenDeck && item.format === button.dataset.chatOpenFormat);
+  if (!deck) return;
+  loadSavedDeck(deck);
+  $('[data-tab="decks"]').click();
+});
 function inlineMarkdown(value) {
   const protectedHtml = [];
   let text = escapeHtml(value).replace(/`([^`]+)`/g, (_, code) => {
@@ -808,7 +816,7 @@ $('#chat-form').addEventListener('submit', async event => {
       renderDeckBuilder();
       $('#chat-deck').value = result.deck.name;
     }
-    state.chatMessages.push({role: 'assistant', content: result.answer}); renderChat();
+    state.chatMessages.push({role: 'assistant', content: result.answer, savedDeck: result.deck || null}); renderChat();
   } catch (error) {
     state.chatMessages.push({role: 'assistant', content: `I couldn't complete that request: ${error.message}`}); renderChat();
   } finally { send.disabled = false; send.textContent = 'Send'; input.focus(); }

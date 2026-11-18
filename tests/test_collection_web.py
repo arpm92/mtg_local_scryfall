@@ -95,6 +95,15 @@ class CollectionWebTests(unittest.TestCase):
             server.server_close()
             thread.join(timeout=2)
 
+    def test_mobile_styles_keep_saved_decks_and_fit_chat_within_phone_width(self):
+        stylesheet = (web.ROOT / "web" / "styles.css").read_text(encoding="utf-8")
+
+        self.assertIn("@media (max-width: 1000px)", stylesheet)
+        self.assertIn(".deck-library { display: block;", stylesheet)
+        self.assertIn("#saved-decks { display: flex;", stylesheet)
+        self.assertIn(".chat-messages { min-height: 34dvh;", stylesheet)
+        self.assertIn(".chat-form { grid-template-columns: minmax(0, 1fr) auto;", stylesheet)
+
     def _post_simulation(self, decks, submitted):
         outputs = self.root / "outputs"
         for deck in decks:
@@ -302,6 +311,9 @@ class CollectionWebTests(unittest.TestCase):
                 self.assertTrue(result["deck"]["validation"]["valid"])
                 self.assertTrue(Path(result["files"]["json"]).is_file())
                 self.assertTrue(Path(result["files"]["forge"]).is_file())
+                with urlopen(base + "/api/decks") as response:
+                    saved_decks = json.loads(response.read())
+                self.assertIn(deck["name"], [saved["name"] for saved in saved_decks])
             finally:
                 server.shutdown()
                 server.server_close()

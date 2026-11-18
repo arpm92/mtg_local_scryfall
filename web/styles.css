@@ -180,6 +180,7 @@ kbd { color: var(--muted); border: 1px solid var(--line); border-radius: 4px; pa
 .chat-message-body table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .chat-message-body th, .chat-message-body td { padding: 6px 8px; border: 1px solid var(--line); text-align: left; vertical-align: top; }
 .chat-message-body th { background: #24272c; }
+.chat-open-deck { margin-top: 10px; padding: 8px 10px; color: #17120b; background: var(--accent); border: 1px solid var(--accent-2); border-radius: 6px; font-weight: 750; }
 .chat-form { display: grid; grid-template-columns: 1fr auto; gap: 9px; align-items: end; }
 .chat-form textarea { resize: vertical; min-height: 52px; }
 .chat-form button:disabled, #simulate-deck:disabled { opacity: .55; cursor: not-allowed; }
@@ -211,9 +212,36 @@ kbd { color: var(--muted); border: 1px solid var(--line); border-radius: 4px; pa
 .forge-stat-card dl { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, 1fr); gap: 5px; margin: 5px 0 0; }
 .forge-stat-card dl div { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 11px; }
 .forge-stat-card dd { margin: 0; color: var(--text); font-weight: 700; }
-@media (max-width: 1000px) { .deck-builder { grid-template-columns: 1fr; } .deck-library { display: none; } .deck-workspace { grid-template-columns: 1fr; } .deck-toolbar { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 1000px) {
+  .deck-builder { grid-template-columns: minmax(0, 1fr); }
+  .deck-library { display: block; min-width: 0; padding: 12px; }
+  #saved-decks { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
+  .saved-deck-row { flex: 0 0 min(240px, 76vw); margin: 0; }
+  .deck-editor, .deck-workspace, .available-cards, .deck-list-panel { min-width: 0; }
+  .deck-workspace { grid-template-columns: minmax(0, 1fr); }
+  .deck-toolbar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .deck-toolbar > * { min-width: 0; }
+}
 @media (max-width: 600px) { .deck-visual-grid { grid-template-columns: repeat(3, minmax(0,1fr)); gap: 10px 6px; } .deck-card-actions { opacity: 1; bottom: 23px; } .deck-card-actions button { width: 26px; height: 26px; } }
-@media (max-width: 600px) { .deck-chat-heading { align-items: flex-start; flex-direction: column; } .chat-connection { max-width: 100%; text-align: left; } .chat-message { max-width: 100%; } .chat-form { grid-template-columns: 1fr; } .chat-form button { justify-self: end; } .simulation-form { padding: 18px; } }
+@media (max-width: 600px) {
+  .deck-chat { min-width: 0; margin: 10px 0 18px; padding: 12px; }
+  .deck-chat-heading { align-items: flex-start; flex-direction: column; gap: 6px; }
+  .deck-chat-heading h1 { font-size: clamp(24px, 7vw, 30px); }
+  .chat-connection { max-width: 100%; text-align: left; overflow-wrap: anywhere; }
+  .chat-settings { display: grid; grid-template-columns: minmax(0, 1fr); gap: 9px; }
+  .chat-deck-label, .chat-model-label { width: 100%; min-width: 0; }
+  .chat-messages { min-height: 34dvh; max-height: 44dvh; padding: 10px; }
+  .chat-message { max-width: 96%; padding: 9px 10px; font-size: 14px; }
+  .chat-form { grid-template-columns: minmax(0, 1fr) auto; gap: 7px; }
+  .chat-form textarea { min-width: 0; min-height: 62px; padding: 10px; }
+  .chat-form button { min-width: 60px; min-height: 48px; padding: 8px 11px; }
+  .deck-toolbar { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .deck-toolbar > label:first-child, .deck-view-switch { grid-column: 1 / -1; }
+  .deck-toolbar button { min-width: 0; padding: 8px; white-space: normal; }
+  .available-cards, .deck-list-panel { min-height: 0; padding: 11px; }
+  .deck-card-list { max-height: 40dvh; }
+  .simulation-form { padding: 18px; }
+}
 
 .hand-dialog { width: min(1180px, calc(100% - 28px)); }
 .hand-tester { display: grid; gap: 10px; padding: 24px; }
