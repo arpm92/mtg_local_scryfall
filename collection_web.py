@@ -626,6 +626,7 @@ def make_handler(payload, architect=None, engine_cards=None, auth_username="", a
                     "main": submitted.get("main") or {},
                     "sideboard": submitted.get("sideboard") or {},
                     "commanders": submitted.get("commanders") or {},
+                    "colors": submitted.get("colors") or [],
                     "archetype": str(submitted.get("archetype") or "Website build")[:100],
                     "power_target": str(submitted.get("power_target") or "")[:100],
                 }

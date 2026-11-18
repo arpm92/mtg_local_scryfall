@@ -347,13 +347,14 @@ class CollectionWebTests(unittest.TestCase):
                 body = json.dumps({
                     "name": "Report Fixture Deck", "format": "pauper",
                     "main": {"Owned Sprout": 4, "Forest": 56}, "sideboard": {}, "commanders": {},
-                    "archetype": "test", "report": report,
+                    "colors": ["G"], "archetype": "test", "report": report,
                 }).encode("utf-8")
                 request = Request("http://127.0.0.1:{}/api/decks".format(server.server_port),
                                   data=body, headers={"Content-Type": "application/json"})
                 with urlopen(request) as response:
                     saved = json.loads(response.read())["deck"]
                 self.assertEqual(saved["report"]["primary_objective"], report["primary_objective"])
+                self.assertEqual(saved["colors"], ["G"])
                 saved_file = next((self.root / "outputs" / "pauper").glob("*.json"))
                 self.assertEqual(json.loads(saved_file.read_text(encoding="utf-8"))["report"], report)
             finally:
