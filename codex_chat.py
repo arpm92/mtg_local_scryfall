@@ -213,14 +213,36 @@ class CodexChat:
         ), None)
         if not assistant_turn:
             return None
+        if CodexChat._is_generic_deck_followup(message) and re.search(
+            r"\b(?:deck|decklist|draft)\b", assistant_turn[1], re.IGNORECASE
+        ):
+            original_request = next((
+                str(item.get("content") or "").strip()
+                for item in reversed(history[:assistant_turn[0]])
+                if isinstance(item, dict)
+                and item.get("role") == "user"
+                and not CodexChat._is_generic_deck_followup(item.get("content"))
+                and CodexChat.is_deck_creation_request({"message": item.get("content")})
+            ), "")
+            if original_request:
+                return original_request
         if re.fullmatch(r"(?:commander|edh|pauper|standard)[.!]?", message, re.IGNORECASE) and re.search(
             r"which format should i use|what format should i use", assistant_turn[1], re.IGNORECASE
         ):
             prior_request = next((
                 str(item.get("content") or "").strip()
                 for item in reversed(history[:assistant_turn[0]])
-                if isinstance(item, dict) and item.get("role") == "user"
+                if isinstance(item, dict)
+                and item.get("role") == "user"
+                and not CodexChat._is_generic_deck_followup(item.get("content"))
+                and CodexChat.is_deck_creation_request({"message": item.get("content")})
             ), "")
+            if not prior_request:
+                prior_request = next((
+                    str(item.get("content") or "").strip()
+                    for item in reversed(history[:assistant_turn[0]])
+                    if isinstance(item, dict) and item.get("role") == "user"
+                ), "")
             if prior_request and CodexChat.is_deck_creation_request({"message": prior_request}):
                 return "{} {}".format(prior_request, message.rstrip(".!"))
 
@@ -238,6 +260,14 @@ class CodexChat:
                 if re.search(r"\bdeck\b", description, re.IGNORECASE):
                     return "Create {} from my available collection.".format(description)
         return None
+
+    @staticmethod
+    def _is_generic_deck_followup(message):
+        normalized = re.sub(r"[.!?]+$", "", str(message or "").strip().casefold())
+        return normalized in {
+            "make deck", "make the deck", "make it", "build deck", "build the deck", "build it",
+            "create the deck", "create it", "generate the deck", "finish the deck", "complete the deck",
+        }
 
     def create_deck(self, request, saved_decks, cards, architect, engine_cards, model=None):
         """Ask Codex for a collection-only deck draft, validate it, and return it unsaved."""

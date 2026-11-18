@@ -28,6 +28,34 @@ class CodexChatTests(unittest.TestCase):
 
         self.assertEqual(resolved, "Can you create an angels-deamon deck with 60 cards? Standard")
 
+    def test_make_deck_followup_restores_the_prior_specific_request(self):
+        request = {
+            "message": "make the deck",
+            "history": [
+                {"role": "user", "content": "Create an Angel-focused Standard deck from my collection."},
+                {"role": "assistant", "content": "This attempt did not return a validated Standard deck draft."},
+            ],
+        }
+
+        resolved = CodexChat.pending_deck_creation_request(request)
+
+        self.assertEqual(resolved, "Create an Angel-focused Standard deck from my collection.")
+
+    def test_format_reply_skips_generic_followup_and_restores_original_deck_request(self):
+        request = {
+            "message": "Standard",
+            "history": [
+                {"role": "user", "content": "Create an Angel-focused Standard deck from my collection."},
+                {"role": "assistant", "content": "This attempt did not return a validated Standard deck draft."},
+                {"role": "user", "content": "make the deck"},
+                {"role": "assistant", "content": "Which format should I use: Commander, Pauper, or Standard?"},
+            ],
+        }
+
+        resolved = CodexChat.pending_deck_creation_request(request)
+
+        self.assertEqual(resolved, "Create an Angel-focused Standard deck from my collection. Standard")
+
     def test_affirmative_reply_accepts_previous_deck_offer(self):
         request = {
             "message": "Yes, please.",
