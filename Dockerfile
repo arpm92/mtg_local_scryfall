@@ -21,7 +21,7 @@ WORKDIR /app
 
 COPY --from=codex /usr/local/bin/codex /usr/local/bin/codex
 
-COPY collection_web.py codex_chat.py enrich_mtg_collection.py ./
+COPY collection_web.py codex_chat.py enrich_mtg_collection.py collection_import.py collection_allocation.py ./
 COPY web ./web
 COPY .agents/skills/mtg-deck-architect/ ./.agents/skills/mtg-deck-architect/
 
