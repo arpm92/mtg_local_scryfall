@@ -48,13 +48,16 @@ class CollectionWebTests(unittest.TestCase):
         }]), encoding="utf-8")
         payload = web.load_collection(csv_path, cache)
         self.assertEqual(payload["summary"], {"cards": 1, "rows": 2, "copies": 5, "uniqueNames": 1})
-        self.assertEqual(payload["cards"][0]["imageUrl"], "https://api.scryfall.com/cards/11111111-1111-4111-8111-111111111111?format=image&version=normal")
+        self.assertEqual(payload["cards"][0]["imageUrl"], "https://cards.scryfall.io/normal/front/1/1/11111111-1111-4111-8111-111111111111.jpg")
+        self.assertEqual(payload["cards"][0]["scryfallUrl"], "https://scryfall.com/card/11111111-1111-4111-8111-111111111111")
         self.assertEqual(payload["cards"][0]["typeLine"], "Creature — Wizard")
         self.assertEqual(payload["cards"][0]["quantity"], 5)
         self.assertEqual(payload["cards"][0]["setCodes"], ["TST", "ALT"])
         self.assertEqual(len(payload["cards"][0]["printings"]), 2)
         self.assertEqual(payload["cards"][0]["printings"][1]["imageUrl"],
-                         "https://api.scryfall.com/cards/22222222-2222-4222-8222-222222222222?format=image&version=normal")
+                         "https://cards.scryfall.io/normal/front/2/2/22222222-2222-4222-8222-222222222222.jpg")
+        self.assertEqual(payload["cards"][0]["printings"][1]["scryfallUrl"],
+                         "https://scryfall.com/card/22222222-2222-4222-8222-222222222222")
         self.assertEqual(payload["cards"][0]["legalities"]["standard"], "legal")
         self.assertEqual([token["name"] for token in payload["cards"][0]["relatedTokens"]], ["Wizard"])
 
@@ -67,8 +70,8 @@ class CollectionWebTests(unittest.TestCase):
 
     def test_printing_images_use_exact_card_uuid_and_reject_invalid_identifiers(self):
         front, back = web.printing_image_urls("33333333-3333-4333-8333-333333333333")
-        self.assertEqual(front, "https://api.scryfall.com/cards/33333333-3333-4333-8333-333333333333?format=image&version=normal")
-        self.assertEqual(back, front + "&face=back")
+        self.assertEqual(front, "https://cards.scryfall.io/normal/front/3/3/33333333-3333-4333-8333-333333333333.jpg")
+        self.assertEqual(back, "https://cards.scryfall.io/normal/back/3/3/33333333-3333-4333-8333-333333333333.jpg")
         self.assertEqual(web.printing_image_urls("not-a-scryfall-id"), ("", ""))
 
     def test_missing_collection_is_rejected(self):

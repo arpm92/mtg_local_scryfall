@@ -75,12 +75,21 @@ def card_images(card):
 
 
 def printing_image_urls(scryfall_id):
-    """Return exact-printing image endpoints for a valid Scryfall card UUID."""
+    """Return exact-printing CDN images for a valid Scryfall card UUID."""
     card_id = str(scryfall_id or "").strip()
     if not re.fullmatch(r"[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}", card_id):
         return "", ""
-    base = "https://api.scryfall.com/cards/{}?format=image&version=normal".format(card_id)
-    return base, base + "&face=back"
+    prefix = "https://cards.scryfall.io/normal"
+    shard = "{}/{}/{}".format(card_id[0], card_id[1], card_id)
+    return "{}/front/{}.jpg".format(prefix, shard), "{}/back/{}.jpg".format(prefix, shard)
+
+
+def printing_scryfall_url(scryfall_id):
+    """Return Scryfall's exact-printing page when a valid card UUID is present."""
+    card_id = str(scryfall_id or "").strip()
+    if not re.fullmatch(r"[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}", card_id):
+        return ""
+    return "https://scryfall.com/card/{}".format(card_id)
 
 
 def related_tokens(card):
@@ -177,7 +186,7 @@ def load_collection(csv_path, cache_dir=DEFAULT_CACHE):
                 or "can be your commander" in (row.get("Oracle Text", "") or "").lower()
             ),
             "relatedTokens": related_tokens(oracle),
-            "scryfallUrl": row.get("Scryfall URL", ""),
+            "scryfallUrl": printing_scryfall_url(row.get("Scryfall ID")) or row.get("Scryfall URL", ""),
             "imageUrl": front,
             "backImageUrl": back,
             "raw": row,
@@ -236,6 +245,7 @@ def group_cards(cards):
                 "quantity": card["quantity"],
                 "imageUrl": card["imageUrl"],
                 "backImageUrl": card["backImageUrl"],
+                "scryfallUrl": card["scryfallUrl"],
             })
         for target, value in (
             ("setCodes", card["setCode"]), ("setNames", card["setName"]),
