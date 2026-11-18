@@ -187,6 +187,57 @@ class CodexChatTests(unittest.TestCase):
         self.assertIn("Deck draft ready", result["answer"])
         self.assertNotIn("saved", result["answer"].casefold())
 
+    def test_create_deck_canonicalizes_a_unique_split_card_face_name(self):
+        chat = CodexChat(command="python")
+        full_name = "Blossom-Blessed Angel // Seed Suture"
+        response = {
+            "name": "Angel Fixture", "archetype": "Angel-focused",
+            "colors": ["W"], "main": {"Blossom-Blessed Angel": 4, "Plains": 56},
+            "sideboard": {}, "commanders": {},
+            "strategy": "Build a flying board and win through combat damage.",
+            "early_game": "Develop mana and prepare the board.",
+            "middle_game": "Deploy flying threats.",
+            "late_game": "Finish with repeated attacks.",
+            "primary_win_condition": "Deal lethal combat damage with flying creatures.",
+            "secondary_win_condition": "Use the prepared spell to strengthen a creature.",
+        }
+        captured = {}
+
+        def fake_turn(instructions, prompt, model=None):
+            captured["prompt"] = prompt
+            return json.dumps(response)
+
+        chat._turn = fake_turn
+        display_cards = [
+            {"name": full_name, "quantity": 4, "manaCost": "{3}{W}", "manaValue": 4,
+             "colors": ["W"], "colorIdentity": ["W", "G"],
+             "typeLine": "Creature — Angel Cleric // Sorcery",
+             "oracleText": "Flying, vigilance. Put a +1/+1 counter on target creature. You gain 1 life.",
+             "keywords": ["Flying", "Vigilance"], "legalities": {"standard": "legal"}},
+            {"name": "Plains", "quantity": 0, "manaCost": "", "manaValue": 0,
+             "colors": [], "colorIdentity": [], "typeLine": "Basic Land — Plains",
+             "oracleText": "({T}: Add {W}.)", "keywords": [], "legalities": {"standard": "not_legal"}},
+        ]
+        engine_cards = [
+            {"name": full_name, "quantity": 4, "mana_cost": "{3}{W}", "mana_value": 4,
+             "color_identity": ["W", "G"], "type_line": "Creature — Angel Cleric // Sorcery",
+             "oracle_text": "Flying, vigilance. Put a +1/+1 counter on target creature. You gain 1 life.",
+             "legalities": {"standard": "legal"}},
+            {"name": "Plains", "quantity": 0, "mana_cost": "", "mana_value": 0,
+             "color_identity": [], "type_line": "Basic Land — Plains",
+             "oracle_text": "({T}: Add {W}.)", "legalities": {"standard": "not_legal"}},
+        ]
+
+        result = chat.create_deck(
+            {"message": "Create an Angel-focused Standard deck from my collection."},
+            [], display_cards, architect, engine_cards,
+        )
+
+        self.assertIn(full_name, captured["prompt"])
+        self.assertEqual(result["deck"]["main"], {full_name: 4, "Plains": 56})
+        self.assertTrue(result["deck"]["validation"]["valid"])
+        self.assertEqual(result["deck"]["validation"]["counts"]["main"], 60)
+
     def test_deck_generation_resolves_a_unique_split_card_face_name(self):
         card_name = "Blossom-Blessed Angel // Seed Suture"
         plan = {"name": "Angel Fixture", "main": {"Blossom-Blessed Angel": 1}}
