@@ -284,7 +284,7 @@ class CollectionWebTests(unittest.TestCase):
             server.server_close()
             thread.join(timeout=2)
 
-    def test_chat_generated_deck_is_validated_and_saved(self):
+    def test_chat_generated_deck_stays_a_draft_until_saved_through_deck_api(self):
         architect = web.load_architect()
         engine_cards = [
             {"name": "Owned Sprout", "quantity": 4, "mana_cost": "{G}", "mana_value": 1,
@@ -329,11 +329,26 @@ class CollectionWebTests(unittest.TestCase):
                 request = Request(base + "/api/chat", data=body, headers={"Content-Type": "application/json"})
                 with urlopen(request) as response:
                     result = json.loads(response.read())
-                    self.assertEqual(response.status, 201)
-                self.assertTrue(result["deck"]["validation"]["valid"])
+                    self.assertEqual(response.status, 200)
+                self.assertTrue(result["deckDraft"]["validation"]["valid"])
+                self.assertNotIn("deck", result)
                 self.assertEqual(chat.received_message, "Create a mono-green Pauper deck. Pauper")
-                self.assertTrue(Path(result["files"]["json"]).is_file())
-                self.assertTrue(Path(result["files"]["forge"]).is_file())
+                with urlopen(base + "/api/decks") as response:
+                    saved_decks = json.loads(response.read())
+                self.assertNotIn(deck["name"], [saved["name"] for saved in saved_decks])
+
+                save_body = {key: result["deckDraft"].get(key) for key in (
+                    "name", "format", "main", "sideboard", "commanders", "colors", "archetype", "report"
+                )}
+                save_request = Request(
+                    base + "/api/decks", data=json.dumps(save_body).encode("utf-8"),
+                    headers={"Content-Type": "application/json"}
+                )
+                with urlopen(save_request) as response:
+                    saved_result = json.loads(response.read())
+                    self.assertEqual(response.status, 201)
+                self.assertTrue(Path(saved_result["files"]["json"]).is_file())
+                self.assertTrue(Path(saved_result["files"]["forge"]).is_file())
                 with urlopen(base + "/api/decks") as response:
                     saved_decks = json.loads(response.read())
                 self.assertIn(deck["name"], [saved["name"] for saved in saved_decks])

@@ -613,12 +613,10 @@ def make_handler(payload, architect=None, engine_cards=None, auth_username="", a
                             deck, self.current_deck_cards(deck.get("name"), deck.get("format")), deck["format"]
                         )
                         if not validation["valid"]:
-                            self.send_json(422, {"error": "Generated deck failed validation; it was not saved.", "validation": validation})
+                            self.send_json(422, {"error": "Generated deck failed validation and cannot be saved.", "validation": validation})
                             return
                         deck["validation"] = validation
-                        files = architect.save_bundle(deck, state["engine_cards"], ROOT / "outputs")
-                        answer = created["answer"] + "\n\nTo play it against Forge AI, open **Decks**, select this deck, choose same-format opponents, then select **Run Forge simulation**."
-                        self.send_json(201, {"answer": answer, "deck": deck, "files": files})
+                        self.send_json(200, {"answer": created["answer"], "deckDraft": deck})
                         return
                     answer = chat.ask(submitted, self.saved_decks(), state["payload"]["cards"], model=model)
                     self.send_json(200, {"answer": answer})

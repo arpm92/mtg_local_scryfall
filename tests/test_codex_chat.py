@@ -28,6 +28,19 @@ class CodexChatTests(unittest.TestCase):
 
         self.assertEqual(resolved, "Can you create an angels-deamon deck with 60 cards? Standard")
 
+    def test_affirmative_reply_accepts_previous_deck_offer(self):
+        request = {
+            "message": "Yes, please.",
+            "history": [
+                {"role": "user", "content": "Can you make an angels-deamon deck?"},
+                {"role": "assistant", "content": "I can build an Angel-focused Standard deck instead if you want."},
+            ],
+        }
+
+        resolved = CodexChat.pending_deck_creation_request(request)
+
+        self.assertEqual(resolved, "Create an Angel-focused Standard deck from my available collection.")
+
     def test_type_context_uses_prior_turn_and_reports_owned_names_and_copies(self):
         chat = CodexChat(command="python")
         captured = {}
@@ -171,7 +184,8 @@ class CodexChatTests(unittest.TestCase):
         )
         self.assertEqual(result["deck"]["main"], {"Owned Sprout": 4, "Forest": 56})
         self.assertTrue(result["deck"]["validation"]["valid"])
-        self.assertIn("Created and saved", result["answer"])
+        self.assertIn("Deck draft ready", result["answer"])
+        self.assertNotIn("saved", result["answer"].casefold())
 
     def test_chat_prompt_includes_only_relevant_collection_data_and_saved_deck(self):
         chat = CodexChat(command="python")
@@ -191,7 +205,7 @@ class CodexChatTests(unittest.TestCase):
         ]
         result = chat.ask({"message": "How does Owned Growth help?", "deckName": "Counter Garden"}, [deck], cards)
         self.assertEqual(result, "Consider adding Owned Growth.")
-        self.assertIn("Never claim you changed or saved a deck", captured["instructions"])
+        self.assertIn("Do not claim a draft was generated or saved unless the app response confirms it", captured["instructions"])
         self.assertIn("Counter Garden", captured["prompt"])
         self.assertIn("Owned Growth", captured["prompt"])
         self.assertNotIn("Unrelated Island", captured["prompt"])

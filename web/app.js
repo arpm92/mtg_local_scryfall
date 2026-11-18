@@ -695,10 +695,42 @@ $('#simulation-form').addEventListener('submit', startSimulation);
 $('#saved-decks').addEventListener('click', event => { const remove = event.target.closest('[data-delete-deck]'); const button = event.target.closest('[data-saved]'); if (remove) deleteDeck(Number(remove.dataset.deleteDeck)); else if (button) loadSavedDeck(state.savedDecks[Number(button.dataset.saved)]); });
 function renderChat() {
   const log = $('#chat-messages');
-  log.innerHTML = state.chatMessages.map(item => `<article class="chat-message ${item.role === 'user' ? 'user' : 'assistant'}"><strong>${item.role === 'user' ? 'You' : 'Codex'}</strong><div class="chat-message-body">${item.role === 'assistant' ? renderMarkdown(item.content) : `<p>${escapeHtml(item.content).replace(/\n/g, '<br>')}</p>`}</div>${item.savedDeck ? `<button class="chat-open-deck" type="button" data-chat-open-deck="${escapeHtml(item.savedDeck.name)}" data-chat-open-format="${escapeHtml(item.savedDeck.format)}">Open saved deck in Decks</button>` : ''}</article>`).join('');
+  log.innerHTML = state.chatMessages.map((item, index) => `<article class="chat-message ${item.role === 'user' ? 'user' : 'assistant'}"><strong>${item.role === 'user' ? 'You' : 'Codex'}</strong><div class="chat-message-body">${item.role === 'assistant' ? renderMarkdown(item.content) : `<p>${escapeHtml(item.content).replace(/\n/g, '<br>')}</p>`}</div>${item.deckDraft ? `<p class="chat-draft-summary">Validated ${escapeHtml(item.deckDraft.format)} draft · ${Object.values(item.deckDraft.main || {}).reduce((sum, count) => sum + Number(count || 0), 0)} main deck cards</p><button class="chat-save-deck" type="button" data-chat-save-deck="${index}" ${item.savingDeck ? 'disabled' : ''}>${item.savingDeck ? 'Saving…' : 'Save deck to Decks'}</button>${item.saveError ? `<p class="chat-save-error" role="alert">${escapeHtml(item.saveError)}</p>` : ''}` : ''}${item.savedDeck ? `<button class="chat-open-deck" type="button" data-chat-open-deck="${escapeHtml(item.savedDeck.name)}" data-chat-open-format="${escapeHtml(item.savedDeck.format)}">Open saved deck in Decks</button>` : ''}</article>`).join('');
   log.scrollTop = log.scrollHeight;
 }
+async function saveChatDeck(index) {
+  const item = state.chatMessages[index];
+  if (!item?.deckDraft || item.savingDeck) return;
+  item.savingDeck = true; item.saveError = '';
+  renderChat();
+  try {
+    const response = await fetch('/api/decks', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(item.deckDraft)});
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'The deck could not be saved.');
+    item.savedDeck = result.deck;
+    item.deckDraft = null;
+    item.content += '\n\nSaved to Decks.';
+    state.savedDecks = [...state.savedDecks.filter(deck => deck.name !== result.deck.name || deck.format !== result.deck.format), result.deck];
+    state.deckInfo = result.deck;
+    state.reservationDeck = {name: result.deck.name, format: result.deck.format};
+    state.deck = {main:{...result.deck.main},sideboard:{...(result.deck.sideboard || {})},commanders:{...(result.deck.commanders || {})}};
+    $('#deck-name').value = result.deck.name;
+    $('#deck-format').value = result.deck.format;
+    $('#chat-deck').value = result.deck.name;
+    try { await reloadCollection(); } catch { /* The saved deck remains available even if collection refresh fails. */ }
+    try { state.savedDecks = await fetch('/api/decks', {cache: 'no-store'}).then(r => r.json()); } catch { /* Keep the successful save response in local state. */ }
+    renderSavedDecks();
+    renderDeckBuilder();
+  } catch (error) {
+    item.saveError = item.savedDeck ? `Deck saved, but the page could not fully refresh: ${error.message}` : error.message;
+  } finally {
+    item.savingDeck = false;
+    renderChat();
+  }
+}
 $('#chat-messages').addEventListener('click', event => {
+  const save = event.target.closest('[data-chat-save-deck]');
+  if (save) { saveChatDeck(Number(save.dataset.chatSaveDeck)); return; }
   const button = event.target.closest('[data-chat-open-deck]');
   if (!button) return;
   const deck = state.savedDecks.find(item => item.name === button.dataset.chatOpenDeck && item.format === button.dataset.chatOpenFormat);
@@ -810,19 +842,7 @@ $('#chat-form').addEventListener('submit', async event => {
     const response = await fetch('/api/chat', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({message, history: state.chatMessages.slice(0, -1), deckName: $('#chat-deck').value, model: $('#chat-model').value})});
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || `Server returned ${response.status}`);
-    if (result.deck) {
-      await reloadCollection();
-      state.savedDecks = await fetch('/api/decks', {cache: 'no-store'}).then(r => r.json());
-      state.deckInfo = result.deck;
-      state.reservationDeck = {name: result.deck.name, format: result.deck.format};
-      state.deck = {main:{...result.deck.main},sideboard:{...(result.deck.sideboard || {})},commanders:{...(result.deck.commanders || {})}};
-      $('#deck-name').value = result.deck.name;
-      $('#deck-format').value = result.deck.format;
-      renderSavedDecks();
-      renderDeckBuilder();
-      $('#chat-deck').value = result.deck.name;
-    }
-    state.chatMessages.push({role: 'assistant', content: result.answer, savedDeck: result.deck || null}); renderChat();
+    state.chatMessages.push({role: 'assistant', content: result.answer, deckDraft: result.deckDraft || null}); renderChat();
   } catch (error) {
     state.chatMessages.push({role: 'assistant', content: `I couldn't complete that request: ${error.message}`}); renderChat();
   } finally { send.disabled = false; send.textContent = 'Send'; input.focus(); }

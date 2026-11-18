@@ -181,6 +181,10 @@ kbd { color: var(--muted); border: 1px solid var(--line); border-radius: 4px; pa
 .chat-message-body th, .chat-message-body td { padding: 6px 8px; border: 1px solid var(--line); text-align: left; vertical-align: top; }
 .chat-message-body th { background: #24272c; }
 .chat-open-deck { margin-top: 10px; padding: 8px 10px; color: #17120b; background: var(--accent); border: 1px solid var(--accent-2); border-radius: 6px; font-weight: 750; }
+.chat-draft-summary { margin: 10px 0 0; color: var(--muted); font-size: 12px; }
+.chat-save-deck { margin-top: 8px; padding: 8px 12px; color: #17120b; background: var(--accent); border: 1px solid var(--accent-2); border-radius: 6px; font-weight: 750; }
+.chat-save-deck:disabled { cursor: wait; opacity: .7; }
+.chat-save-error { margin: 8px 0 0; color: #ff9b9b; font-size: 13px; }
 .chat-form { display: grid; grid-template-columns: 1fr auto; gap: 9px; align-items: end; }
 .chat-form textarea { resize: vertical; min-height: 52px; }
 .chat-form button:disabled, #simulate-deck:disabled { opacity: .55; cursor: not-allowed; }
