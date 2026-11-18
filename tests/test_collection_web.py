@@ -21,6 +21,11 @@ class CollectionWebTests(unittest.TestCase):
     def tearDown(self):
         self.tempdir.cleanup()
 
+    def test_card_dialog_close_handler_is_scoped_to_its_button(self):
+        app_script = (Path(web.ROOT) / "web" / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn("$('#card-dialog .dialog-close').addEventListener('click'", app_script)
+
     def test_load_collection_and_cached_images(self):
         csv_path = self.root / "collection.csv"
         fields = ["Name", "Quantity", "Set code", "Set name", "Scryfall Oracle ID",

@@ -154,7 +154,7 @@ controls.forEach(control => control.addEventListener('change', applyFilters));
 $('#clear').addEventListener('click', () => { search.value = ''; controls.slice(0,5).forEach(x => x.value = ''); applyFilters(); search.focus(); });
 $('#show-more').addEventListener('click', () => { state.visible += 60; render(); });
 grid.addEventListener('click', event => { const button = event.target.closest('[data-index]'); if (button) openCard(Number(button.dataset.index)); });
-$('.dialog-close').addEventListener('click', () => $('#card-dialog').close());
+$('#card-dialog .dialog-close').addEventListener('click', () => $('#card-dialog').close());
 $('#card-dialog').addEventListener('click', event => { if (event.target === $('#card-dialog')) $('#card-dialog').close(); });
 document.addEventListener('keydown', event => { if (event.key === '/' && document.activeElement !== search) { event.preventDefault(); search.focus(); } });
 
