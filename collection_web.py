@@ -637,7 +637,9 @@ def make_handler(payload, architect=None, engine_cards=None, auth_username="", a
                     deck, self.current_deck_cards(deck["name"], deck["format"])
                 )
                 deck["validation"] = validation
-                deck["report"] = architect.deck_report(deck, state["engine_cards"])
+                submitted_report = submitted.get("report")
+                deck["report"] = (submitted_report if isinstance(submitted_report, dict)
+                                   else architect.deck_report(deck, state["engine_cards"]))
                 if not validation["valid"]:
                     self.send_json(400, {"error": "Deck is not valid.", "validation": validation})
                     return

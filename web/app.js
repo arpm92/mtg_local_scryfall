@@ -1,4 +1,5 @@
 const state = { all: [], filtered: [], visible: 60, formats: {}, savedDecks: [], chatMessages: [], chatAvailable: false, chatModelsLoaded: false, deckView: 'grid', deckInfo: null, reservationDeck: null, deck: {main: {}, sideboard: {}, commanders: {}} };
+const DEFAULT_CHAT_MODEL = 'gpt-5.6-luna';
 const $ = (selector) => document.querySelector(selector);
 const grid = $('#card-grid');
 const search = $('#search');
@@ -762,9 +763,14 @@ async function loadChatModels() {
   const response = await fetch('/api/chat/models', {cache: 'no-store'});
   const data = await response.json();
   if (!response.ok) throw new Error(data.error || 'Could not load Codex models.');
-  const select = $('#chat-model'); const saved = localStorage.getItem('mtg-chat-model') || '';
-  select.innerHTML = '<option value="">Codex default</option>' + (data.models || []).map(model => `<option value="${escapeHtml(model.id)}">${escapeHtml(model.name)}${model.isDefault ? ' · default' : ''}</option>`).join('');
-  if ((data.models || []).some(model => model.id === saved)) select.value = saved;
+  const select = $('#chat-model'); const saved = localStorage.getItem('mtg-chat-model');
+  const models = data.models || [];
+  const preferred = models.some(model => model.id === DEFAULT_CHAT_MODEL)
+    ? DEFAULT_CHAT_MODEL : (models.find(model => model.isDefault)?.id || '');
+  select.innerHTML = '<option value="">Codex default</option>' + models.map(model => `<option value="${escapeHtml(model.id)}">${escapeHtml(model.name)}${model.isDefault ? ' · default' : ''}</option>`).join('');
+  const selected = saved === null || (saved && !models.some(model => model.id === saved)) ? preferred : saved;
+  select.value = selected;
+  if (saved !== selected) localStorage.setItem('mtg-chat-model', selected);
   state.chatModelsLoaded = true;
 }
 $('#chat-model').addEventListener('change', () => localStorage.setItem('mtg-chat-model', $('#chat-model').value));

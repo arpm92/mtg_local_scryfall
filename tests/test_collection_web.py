@@ -104,6 +104,12 @@ class CollectionWebTests(unittest.TestCase):
         self.assertIn(".chat-messages { min-height: 34dvh;", stylesheet)
         self.assertIn(".chat-form { grid-template-columns: minmax(0, 1fr) auto;", stylesheet)
 
+    def test_chat_model_picker_defaults_to_gpt_5_6_luna(self):
+        app_script = (web.ROOT / "web" / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn("const DEFAULT_CHAT_MODEL = 'gpt-5.6-luna';", app_script)
+        self.assertIn("model.id === DEFAULT_CHAT_MODEL", app_script)
+
     def _post_simulation(self, decks, submitted):
         outputs = self.root / "outputs"
         for deck in decks:
@@ -314,6 +320,42 @@ class CollectionWebTests(unittest.TestCase):
                 with urlopen(base + "/api/decks") as response:
                     saved_decks = json.loads(response.read())
                 self.assertIn(deck["name"], [saved["name"] for saved in saved_decks])
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=2)
+
+    def test_deck_save_keeps_the_provided_strategy_report(self):
+        architect = web.load_architect()
+        engine_cards = [
+            {"name": "Owned Sprout", "quantity": 4, "mana_cost": "{G}", "mana_value": 1,
+             "color_identity": ["G"], "type_line": "Creature â€” Plant", "oracle_text": "Trample.",
+             "legalities": {"pauper": "legal"}, "printings": [{"set": "TST", "collector": "1"}]},
+            {"name": "Forest", "quantity": 1, "mana_cost": "", "mana_value": 0,
+             "color_identity": [], "type_line": "Basic Land â€” Forest", "oracle_text": "({T}: Add {G}.)",
+             "legalities": {"pauper": "not_legal"}, "printings": [{"set": "TST", "collector": "2"}]},
+        ]
+        report = {"primary_objective": "Marvel Heroes gain life and grow a counter board.",
+                  "early_game": "Deploy cheap Heroes and establish the life-gain engine."}
+        with patch.object(web, "ROOT", self.root):
+            server = ThreadingHTTPServer(("127.0.0.1", 0), web.make_handler(
+                {"cards": []}, architect=architect, engine_cards=engine_cards
+            ))
+            thread = Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                body = json.dumps({
+                    "name": "Report Fixture Deck", "format": "pauper",
+                    "main": {"Owned Sprout": 4, "Forest": 56}, "sideboard": {}, "commanders": {},
+                    "archetype": "test", "report": report,
+                }).encode("utf-8")
+                request = Request("http://127.0.0.1:{}/api/decks".format(server.server_port),
+                                  data=body, headers={"Content-Type": "application/json"})
+                with urlopen(request) as response:
+                    saved = json.loads(response.read())["deck"]
+                self.assertEqual(saved["report"]["primary_objective"], report["primary_objective"])
+                saved_file = next((self.root / "outputs" / "pauper").glob("*.json"))
+                self.assertEqual(json.loads(saved_file.read_text(encoding="utf-8"))["report"], report)
             finally:
                 server.shutdown()
                 server.server_close()
