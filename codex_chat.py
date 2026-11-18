@@ -251,6 +251,23 @@ class CodexChat:
         if not candidates:
             raise ValueError("There are no owned cards in the current {}-legal collection.".format(config["display_name"]))
 
+        requested_types = self._owned_card_type_summary(question, cards)
+        demon_pool = requested_types.get("demon")
+        if demon_pool and demon_pool["requested_format_available_copies"] == 0:
+            angels = requested_types.get("angel", {})
+            angel_overall = "{} Angel copies across {} distinct names".format(
+                angels.get("owned_copies", 0), angels.get("distinct_cards", 0)
+            )
+            angel_legal = "{} Standard-legal Angel copies across {} names".format(
+                angels.get("standard_legal_copies", 0), angels.get("standard_legal_distinct", 0)
+            )
+            return {"clarification": (
+                "I checked the available collection: 0 available {}-legal Demon copies. "
+                "There are {} overall, including {}. I can’t build an Angels–Demons tribal deck "
+                "from the owned legal cards without inventing or substituting the missing Demon cards. "
+                "No deck was created or saved. I can build an Angel-focused {} deck instead if you want."
+            ).format(config["display_name"], angel_overall, angel_legal, config["display_name"])}
+
         by_candidate = {str(card.get("name") or "").casefold(): card for card in candidates}
         rules = {
             "format": format_name,
@@ -570,35 +587,42 @@ class CodexChat:
 
         format_name = CodexChat._requested_format(question)
         result = {}
+        def owned_quantity(card):
+            availability = card.get("availability") or {}
+            return int(availability.get("totalOwned", card.get("quantity") or 0))
+
+        def available_quantity(card):
+            availability = card.get("availability") or {}
+            return int(availability.get("available", card.get("quantity") or 0))
+
         for key, display_name in type_terms.items():
             matched = [card for card in cards if re.search(
                 r"\b{}\b".format(display_name), str(card.get("typeLine") or ""), re.IGNORECASE
-            ) and int(card.get("quantity") or 0) > 0]
+            ) and owned_quantity(card) > 0]
             legal = [card for card in matched if not format_name or
                      (card.get("legalities") or {}).get(format_name) == "legal"]
             result[key] = {
                 "type": display_name,
                 "distinct_cards": len(matched),
-                "owned_copies": sum(int(card.get("quantity") or 0) for card in matched),
-                "available_copies": sum(int((card.get("availability") or {}).get("available", card.get("quantity") or 0)) for card in matched),
+                "owned_copies": sum(owned_quantity(card) for card in matched),
+                "available_copies": sum(available_quantity(card) for card in matched),
                 "standard_legal_distinct": len([card for card in matched if (card.get("legalities") or {}).get("standard") == "legal"]),
-                "standard_legal_copies": sum(int(card.get("quantity") or 0) for card in matched
+                "standard_legal_copies": sum(owned_quantity(card) for card in matched
                                               if (card.get("legalities") or {}).get("standard") == "legal"),
                 "standard_legal_available_copies": sum(
-                    int((card.get("availability") or {}).get("available", card.get("quantity") or 0))
+                    available_quantity(card)
                     for card in matched if (card.get("legalities") or {}).get("standard") == "legal"
                 ),
                 "requested_format": format_name,
                 "requested_format_legal_distinct": len(legal),
-                "requested_format_legal_copies": sum(int(card.get("quantity") or 0) for card in legal),
+                "requested_format_legal_copies": sum(owned_quantity(card) for card in legal),
                 "requested_format_available_copies": sum(
-                    int((card.get("availability") or {}).get("available", card.get("quantity") or 0))
-                    for card in legal
+                    available_quantity(card) for card in legal
                 ),
                 "cards": [{
                     "name": str(card.get("name") or ""),
-                    "owned": int(card.get("quantity") or 0),
-                    "available": int((card.get("availability") or {}).get("available", card.get("quantity") or 0)),
+                    "owned": owned_quantity(card),
+                    "available": available_quantity(card),
                     "standard_legality": (card.get("legalities") or {}).get("standard", "unknown"),
                     "requested_format_legality": (card.get("legalities") or {}).get(format_name, "unknown") if format_name else None,
                 } for card in matched],

@@ -63,6 +63,28 @@ class CodexChatTests(unittest.TestCase):
         self.assertIn("Use owned_card_type_summary for creature-type questions", captured["instructions"])
         self.assertEqual({card["name"] for card in context["owned_cards_matching_question_or_deck"]}, {"Angel One", "Angel Two"})
 
+    def test_deck_creation_does_not_silently_drop_unavailable_requested_tribe(self):
+        chat = CodexChat(command="python")
+        chat._turn = lambda *args, **kwargs: self.fail("Unsupported tribal request must stop before deck generation.")
+        cards = [
+            {"name": "Angel One", "quantity": 3, "typeLine": "Creature — Angel",
+             "legalities": {"standard": "legal"}, "oracleId": "a1"},
+            {"name": "Angel Two", "quantity": 2, "typeLine": "Creature — Angel Cleric",
+             "legalities": {"standard": "legal"}, "oracleId": "a2"},
+            {"name": "Old Angel", "quantity": 1, "typeLine": "Creature — Angel",
+             "legalities": {"standard": "not_legal"}, "oracleId": "a3"},
+        ]
+
+        result = chat.create_deck(
+            {"message": "Create an angels-deamon Standard deck."}, [], cards, architect, cards
+        )
+
+        self.assertNotIn("deck", result)
+        self.assertIn("0 available Standard-legal Demon copies", result["clarification"])
+        self.assertIn("6 Angel copies across 3 distinct names", result["clarification"])
+        self.assertIn("5 Standard-legal Angel copies across 2 names", result["clarification"])
+        self.assertIn("No deck was created or saved", result["clarification"])
+
     def test_default_codex_timeout_allows_longer_collection_comparisons(self):
         with patch.dict(os.environ, {
             "MTG_CODEX_ENABLED": "true", "MTG_CODEX_COMMAND": "codex", "CODEX_HOME": "/tmp/codex-test"
