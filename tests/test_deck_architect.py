@@ -95,6 +95,18 @@ class DeckArchitectTests(unittest.TestCase):
         self.assertIn("Unsupported cards: Example Card", text)
         self.assertIn("These games do not count.", text)
 
+    def test_deck_report_includes_synergy_engine_details(self):
+        text = engine.render_report({
+            "name": "Connive Tempo", "format": "legacy", "main": {"Island": 60},
+            "sideboard": {}, "commanders": {}, "validation": {"valid": True},
+            "report": {
+                "engine_heading": "Connive engine · 11 direct sources",
+                "engine_details": ["Red Room Recruit connives on entry."],
+            },
+        })
+        self.assertIn("## Connive engine · 11 direct sources", text)
+        self.assertIn("Red Room Recruit connives on entry.", text)
+
     def test_forge_runner_refuses_wrong_player_count_before_launch(self):
         value = engine.run_forge_simulation(["one.dck"], "pauper")
         self.assertEqual(value["status"], "unsupported")

@@ -324,9 +324,11 @@ function renderDeckPrimer() {
     return;
   }
   const wins = report.win_conditions || [];
+  const engineDetails = report.engine_details || [];
   $('#deck-primer').innerHTML = `<div class="deck-primer-header"><div><span class="primer-label">Deck primer</span><h2>${escapeHtml(state.deckInfo.archetype || 'Deck strategy')}</h2></div><span class="primer-label">${escapeHtml(report.identity || '')}</span></div>
     <p>${escapeHtml(report.primary_objective || '')}</p>
     <div class="primer-path"><div><strong>Early game</strong>${escapeHtml(report.early_game || '')}</div><div><strong>Mid game</strong>${escapeHtml(report.middle_game || '')}</div><div><strong>Late game</strong>${escapeHtml(report.late_game || '')}</div></div>
+    ${engineDetails.length ? `<div class="primer-engine"><strong>${escapeHtml(report.engine_heading || 'Synergy engine')}</strong><ul>${engineDetails.map(detail => `<li>${escapeHtml(detail)}</li>`).join('')}</ul></div>` : ''}
     <p><strong>Winning conditions</strong></p><div class="primer-wins">${wins.length ? wins.map(name => `<span>${escapeHtml(name)}</span>`).join('') : '<span>No distinct finishers detected</span>'}</div>`;
 }
 function renderDeckBuilder() {

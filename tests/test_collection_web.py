@@ -27,6 +27,12 @@ class CollectionWebTests(unittest.TestCase):
 
         self.assertIn("$('#card-dialog .dialog-close').addEventListener('click'", app_script)
 
+    def test_deck_primer_displays_synergy_engine_details(self):
+        app_script = (Path(web.ROOT) / "web" / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn("const engineDetails = report.engine_details || []", app_script)
+        self.assertIn("report.engine_heading || 'Synergy engine'", app_script)
+
     def test_legacy_format_is_exposed_in_builder_battles_and_api_rules(self):
         handler = web.make_handler({}, architect=web.load_architect())
         server = ThreadingHTTPServer(("127.0.0.1", 0), handler)

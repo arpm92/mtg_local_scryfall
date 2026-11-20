@@ -111,6 +111,10 @@ kbd { color: var(--muted); border: 1px solid var(--line); border-radius: 4px; pa
 .primer-path { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin-top: 12px; }
 .primer-path div { padding: 8px 10px; background: #101216aa; border-radius: 6px; color: var(--muted); font-size: 12px; }
 .primer-path strong { display: block; color: var(--text); }
+.primer-engine { margin-top: 12px; padding-top: 10px; border-top: 1px solid #ffffff1a; color: var(--muted); font-size: 12px; }
+.primer-engine > strong { color: var(--text); }
+.primer-engine ul { display: grid; gap: 4px; margin: 6px 0 0; padding-left: 20px; }
+.primer-engine li { line-height: 1.45; }
 .primer-wins { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .primer-wins span { padding: 4px 8px; color: #17120b; background: var(--accent); border-radius: 999px; font-size: 11px; font-weight: 750; }
 .deck-workspace { display: grid; grid-template-columns: minmax(260px, .55fr) minmax(560px, 1.45fr); gap: 14px; }

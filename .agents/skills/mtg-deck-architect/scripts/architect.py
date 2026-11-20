@@ -545,6 +545,11 @@ def render_report(deck):
             sections.extend(["### {}".format(heading), ""])
             sections.extend("{} {}".format(count, name) for name, count in sorted(deck[key].items()))
             sections.append("")
+    engine_details = report.get("engine_details", [])
+    if engine_details:
+        sections.extend(["## {}".format(report.get("engine_heading", "Synergy engine")), ""])
+        sections.extend("- {}".format(detail) for detail in engine_details)
+        sections.append("")
     if validation.get("errors"):
         sections.extend(["## Validation errors", ""] + ["- " + error for error in validation["errors"]])
     evidence = deck.get("forge_evidence")
