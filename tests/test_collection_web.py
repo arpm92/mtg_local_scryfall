@@ -520,6 +520,24 @@ class CollectionWebTests(unittest.TestCase):
             server.server_close()
             thread.join(timeout=2)
 
+    def test_deck_export_module_is_served_and_controls_are_available(self):
+        server = ThreadingHTTPServer(("127.0.0.1", 0), web.make_handler({"cards": []}))
+        thread = Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with urlopen("http://127.0.0.1:{}/deck_export.js".format(server.server_port)) as response:
+                self.assertEqual(response.status, 200)
+                self.assertIn("MtgDeckExport", response.read().decode("utf-8"))
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+        index = (web.ROOT / "web" / "index.html").read_text(encoding="utf-8")
+        app_script = (web.ROOT / "web" / "app.js").read_text(encoding="utf-8")
+        self.assertIn("Moxfield / Archidekt / ManaBox (.txt)", index)
+        self.assertIn('id="copy-deck-export"', index)
+        self.assertIn("MtgDeckExport.toCsv(deck)", app_script)
+
     def test_mobile_styles_keep_saved_decks_and_fit_chat_within_phone_width(self):
         stylesheet = (web.ROOT / "web" / "styles.css").read_text(encoding="utf-8")
 

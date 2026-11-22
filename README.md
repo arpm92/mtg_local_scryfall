@@ -49,6 +49,7 @@ Review the unmatched report after every run. Ambiguous names are intentionally n
 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
+node tests\test_deck_export.js
 ```
 
 ## Browse and filter the collection
@@ -64,6 +65,10 @@ Open `http://127.0.0.1:8000/` and stop the server with `Ctrl+C`. Use `--csv PATH
 Duplicate collection rows are grouped by Scryfall Oracle identity; quantities are summed and each owned printing remains visible in the card detail dialog.
 
 Use **Import ManaBox CSV** to analyze an additional export against the locally cached Scryfall Oracle dataset. A **Bulk scan** adds its copies to your displayed collection. A **Deck scan** asks for a deck name, adds its copies, and reserves them for a read-only, unclassified scanned deck; unmatched or ambiguous rows prevent saving a deck scan. The import ledger is stored at `outputs/collection_imports.json`, and the source CSV is never changed. Card details show owned, reserved, and available quantities by saved deck. Removing a scanned deck releases its reservation while keeping the scanned cards in your collection.
+
+## Export a deck list
+
+In **Decks**, choose a deck or build a draft, then select an export format and use **Download list** or **Copy list**. The shared text format uses `Commander`, `Deck`, and `Sideboard` sections with `quantity card name` lines; ManaBox documents this common text-list format, and the same text can be pasted into Moxfield or Archidekt importers. The CSV option is a portable `Section,Quantity,Card Name` table. Exports preserve exact card names and quantities, including double-faced names, but do not include printing/set identifiers because the deck editor stores card names rather than a selected printing.
 
 The `Decks` tab is an owned-card deck builder. Choose Commander, Pauper, Standard, or Legacy, add cards to the appropriate section, then select **Validate & save**. Saved decks can be viewed as image cards or a compact list; the visual board groups cards by Commander, creatures, artifacts, enchantments, instants, sorceries, lands, and other card types. Select any card image to open its uncropped full details. A short deck primer summarizes the main plan, early/mid/late game, and winning conditions. Scryfall token and emblem relationships are collected automatically into a display-only **Tokens & Emblems** section with their creating cards; accessories never count toward deck size or ownership. The delete button beside a saved deck asks for confirmation and moves its JSON, report, and Forge file to `outputs/.trash/` for recovery. The server enforces current Scryfall legality, deck-size, copy and ownership limits, Commander identity, and sideboard limits. Valid decks are saved as JSON, a strategy report, and a Forge `.dck` file under `outputs/<format>/`.
 

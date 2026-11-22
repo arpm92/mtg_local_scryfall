@@ -525,6 +525,7 @@ def make_handler(payload, architect=None, engine_cards=None, auth_username="", a
         "/index.html": ("index.html", "text/html; charset=utf-8"),
         "/app.js": ("app.js", "text/javascript; charset=utf-8"),
         "/hand_tester.js": ("hand_tester.js", "text/javascript; charset=utf-8"),
+        "/deck_export.js": ("deck_export.js", "text/javascript; charset=utf-8"),
         "/simulation_stats.js": ("simulation_stats.js", "text/javascript; charset=utf-8"),
         "/styles.css": ("styles.css", "text/css; charset=utf-8"),
     }

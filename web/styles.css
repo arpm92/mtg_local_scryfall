@@ -96,6 +96,8 @@ kbd { color: var(--muted); border: 1px solid var(--line); border-radius: 4px; pa
 .deck-editor { padding: 16px; }
 #deck-editor { scroll-margin-top: 180px; }
 .deck-toolbar { display: grid; grid-template-columns: minmax(180px, 1fr) 150px auto auto auto; gap: 10px; align-items: end; }
+.deck-export-format { min-width: 210px; }
+.deck-toolbar button:disabled { opacity: .48; cursor: not-allowed; }
 .deck-toolbar label { color: var(--muted); font-size: 11px; font-weight: 700; text-transform: uppercase; }
 .deck-toolbar input, .deck-toolbar select, #deck-search { width: 100%; padding: 9px; color: var(--text); background: #0d0f12; border: 1px solid var(--line); border-radius: 6px; }
 .primary-button { padding: 9px 16px; color: #17120b; background: var(--accent); border: 1px solid var(--accent-2); border-radius: 7px; font-weight: 750; }

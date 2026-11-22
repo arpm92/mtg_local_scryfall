@@ -91,6 +91,9 @@
             <button id="simulate-deck" class="subtle-button" type="button" disabled>Run Forge simulation</button>
             <button id="test-hand" class="subtle-button" type="button" disabled>Test hand</button>
             <button id="battle-decks" class="subtle-button" type="button" disabled>Battle decks</button>
+            <label class="deck-export-format">Export format<select id="deck-export-format"><option value="text">Moxfield / Archidekt / ManaBox (.txt)</option><option value="csv">Generic deck CSV (.csv)</option></select></label>
+            <button id="export-deck" class="subtle-button" type="button" disabled>Download list</button>
+            <button id="copy-deck-export" class="subtle-button" type="button" disabled>Copy list</button>
             <button id="validate-deck" class="subtle-button" type="button">Validate deck</button>
             <button id="save-deck" class="primary-button" type="button" disabled>Save deck</button>
           </div>
@@ -209,6 +212,7 @@
   </dialog>
 
   <script src="/hand_tester.js" defer></script>
+  <script src="/deck_export.js" defer></script>
   <script src="/simulation_stats.js" defer></script>
   <script src="/app.js" defer></script>
 </body>

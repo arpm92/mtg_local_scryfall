@@ -420,6 +420,9 @@ function renderDeckBuilder() {
     || state.validatedDeckFingerprint !== deckFingerprint(deckPayload());
   $('#save-deck').textContent = state.deckValidation && (!state.deckValidation.valid || state.deckValidation.collection_complete === false)
     ? 'Save as draft' : 'Save deck';
+  const hasCards = ['main', 'sideboard', 'commanders'].some(section => Object.keys(state.deck[section] || {}).length);
+  $('#export-deck').disabled = !hasCards;
+  $('#copy-deck-export').disabled = !hasCards;
   $('#simulate-deck').disabled = !state.deckInfo || scanned || format === 'scanned' || !state.simulationAvailable;
   $('#test-hand').disabled = !state.deckInfo || scanned || format === 'scanned';
   updateBattleButton();
@@ -583,6 +586,46 @@ function createNewDeck() {
   $('#deck-name').focus();
 }
 function loadSavedDeck(deck) { closeHandTester(); clearDeckValidation(); state.deckInfo = deck; state.reservationDeck = {name: deck.name, format: deck.format}; state.deck = {main: {...deck.main}, sideboard: {...(deck.sideboard || {})}, commanders: {...(deck.commanders || {})}}; $('#deck-name').value = deck.name; $('#deck-format').value = deck.format; $('#chat-deck').value = deck.name; renderDeckBuilder(); if (deck.format !== 'scanned') checkSavedDeck(deck); }
+function exportCurrentDeck() {
+  const deck = {...state.deck, name: $('#deck-name').value.trim() || 'deck'};
+  const kind = $('#deck-export-format').value;
+  const content = kind === 'csv' ? MtgDeckExport.toCsv(deck) : MtgDeckExport.toText(deck);
+  const blob = new Blob([content], {type: kind === 'csv' ? 'text/csv;charset=utf-8' : 'text/plain;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = MtgDeckExport.filename(deck, kind === 'csv' ? 'csv' : 'txt');
+  document.body.append(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+async function copyCurrentDeckExport() {
+  const deck = {...state.deck, name: $('#deck-name').value.trim() || 'deck'};
+  const content = $('#deck-export-format').value === 'csv'
+    ? MtgDeckExport.toCsv(deck) : MtgDeckExport.toText(deck);
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(content);
+    } else {
+      const textarea = document.createElement('textarea');
+      textarea.value = content;
+      textarea.setAttribute('readonly', '');
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.append(textarea);
+      textarea.select();
+      const copied = document.execCommand('copy');
+      textarea.remove();
+      if (!copied) throw new Error('Clipboard access is unavailable in this browser context.');
+    }
+    $('#deck-status').textContent = 'Deck list copied to clipboard.';
+    $('#deck-status').className = 'deck-status success';
+  } catch (error) {
+    $('#deck-status').textContent = `Could not copy the deck list: ${error.message}`;
+    $('#deck-status').className = 'deck-status error';
+  }
+}
 async function checkSavedDeck(deck) {
   const status = $('#deck-status');
   status.className = 'deck-status';
@@ -712,6 +755,8 @@ async function saveDeck() {
   } catch (error) { status.classList.add('error'); status.textContent = error.message; }
 }
 $('#deck-card-list').addEventListener('click', event => { const button = event.target.closest('[data-add]'); if (button) addToDeck(button.dataset.card, button.dataset.add); });
+$('#export-deck').addEventListener('click', exportCurrentDeck);
+$('#copy-deck-export').addEventListener('click', copyCurrentDeckExport);
 $('.deck-list-panel').addEventListener('click', event => { const add = event.target.closest('[data-add]'); const remove = event.target.closest('[data-remove]'); if (add) addToDeck(add.dataset.card, add.dataset.add); if (remove) removeFromDeck(remove.dataset.card, remove.dataset.remove); });
 $('#decks-view').addEventListener('click', event => {
   const preview = event.target.closest('[data-preview-index]');
