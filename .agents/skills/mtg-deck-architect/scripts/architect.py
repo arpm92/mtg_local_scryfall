@@ -361,6 +361,107 @@ def build_decks(format, count=1, colors=None, archetype=None, power_target=None,
     return decks
 
 
+def _primer_commander_plan(selected, commander):
+    """Return card-text-grounded phase advice for recognized Commander engines."""
+    if not commander:
+        return {}
+    commander_text = str(commander.get("oracle_text") or "")
+    all_text = "\n".join(str(card.get("oracle_text") or "") for card, _ in selected)
+    names = {str(card.get("name") or "").casefold(): card.get("name") for card, _ in selected}
+    named = lambda *values: [names[value.casefold()] for value in values if value.casefold() in names]
+
+    # Villain connive/discard: both the commander text and its deck support must exist.
+    if "connive" in commander_text.casefold() and "Villain" in commander_text and "discard" in commander_text.casefold():
+        connivers = [card["name"] for card, _ in selected
+                     if "connive" in str(card.get("oracle_text") or "").casefold()]
+        villain_etb_connivers = [card["name"] for card, _ in selected
+                                if "villain" in str(card.get("oracle_text") or "").casefold()
+                                and "connive" in str(card.get("oracle_text") or "").casefold()]
+        returns = [card["name"] for card, _ in selected
+                   if "return target villain" in str(card.get("oracle_text") or "").casefold()]
+        discard_payoffs = [card["name"] for card, _ in selected
+                           if any(phrase in str(card.get("oracle_text") or "").casefold()
+                                  for phrase in ("whenever you discard", "whenever you cycle or discard"))]
+        return {
+            "primary_objective": "Use Villain arrivals and combat connive to filter cards, grow a threatening attacker, and turn discarded lands into multiplayer life loss.",
+            "early_game": "Develop colored mana, then establish a connive or discard outlet. "
+                          + ("Tombstone discounts Villain spells and returns a Villain from the graveyard." if named("Tombstone, Career Criminal") else "Prioritize low-cost Villains that start the discard engine."),
+            "middle_game": ("Doctor Doom gives a Villain menace and connives at each of your combats; "
+                            + ("Prowler, Clawed Thief also connives whenever another Villain enters." if named("Prowler, Clawed Thief") else "use the other listed Villain-entry connivers to add repeatable loots." )
+                            + (" Leader, Super-Genius draws before a creature connives, increasing card selection." if named("Leader, Super-Genius") else "")
+                            + (" A nonland discarded to connive puts a +1/+1 counter on that creature." if "discarded a nonland card" in all_text.casefold() else "")),
+            "late_game": ("Discarding a land makes each opponent lose 2 life; "
+                          + ("Faith of the Devoted adds another drain-and-gain trigger when cards are discarded." if named("Faith of the Devoted") else "use the land-discard trigger as reach while recurring Villains.")
+                          + ((" Graveyard recovery: " + ", ".join(returns[:3]) + ".") if returns else "")
+                          + ((" Additional discard payoffs: " + ", ".join(discard_payoffs[:3]) + ".") if discard_payoffs else "")),
+            "engine_heading": "Villain connive and discard engine",
+            "engine_details": (["Doctor Doom turns one combat connive each turn into menace plus card filtering; nonland discards also add a +1/+1 counter."]
+                               + (["Villain-entry connive sources: " + ", ".join(villain_etb_connivers[:5]) + "."] if villain_etb_connivers else [])
+                               + (["Discard-trigger payoffs: " + ", ".join(discard_payoffs[:5]) + "."] if discard_payoffs else [])),
+        }
+
+    # Jace's planeswalker package: empower cards and creature-to-hit polymorph effects.
+    if "planeswalker" in str(commander.get("type_line") or "").casefold() and "reveal cards from the top" in commander_text.casefold():
+        empowers = [card["name"] for card, _ in selected
+                    if "empower jace" in str(card.get("oracle_text") or "").casefold()]
+        polymorphs = [card["name"] for card, _ in selected
+                      if "cards from the top" in str(card.get("oracle_text") or "").casefold()
+                      and "reveal" in str(card.get("oracle_text") or "").casefold()
+                      and any(word in str(card.get("oracle_text") or "").casefold()
+                              for word in ("exile target creature", "exile all creatures", "destroy target creature",
+                                           "put target permanent you own on the bottom"))]
+        token_makers = [card["name"] for card, _ in selected
+                        if "create" in str(card.get("oracle_text") or "").casefold()
+                        and "creature token" in str(card.get("oracle_text") or "").casefold()]
+        topdeck_setup = [card["name"] for card, _ in selected
+                         if "on top of your library" in str(card.get("oracle_text") or "").casefold()]
+        return {
+            "primary_objective": "Build expendable creatures and empower Jace, then trade a token or other small creature for a high-impact creature or planeswalker from the library.",
+            "early_game": ("Use mana rocks to reach Jace and cast noncreature spells that trigger the deck's empower Jace cards." if empowers else "Develop mana and establish Jace before committing expensive threats.")
+                          + ((" Empower sources: " + ", ".join(empowers[:4]) + ".") if empowers else ""),
+            "middle_game": ("Use Jace's −3 on an expendable creature to reveal into a creature or planeswalker; "
+                            + (("token makers such as " + ", ".join(token_makers[:4]) + " supply fodder. ") if token_makers else "protect the few creatures you can afford to convert. ")
+                            + (("Other conversion spells in this list: " + ", ".join(polymorphs[:5]) + ".") if polymorphs else "The list has few additional conversion effects, so preserve Jace's activation for a strong hit.")),
+            "late_game": (("Use " + ", ".join(topdeck_setup[:3]) + " to put a high-impact creature or planeswalker on top before Jace's −3; "
+                           if topdeck_setup else "Keep enough high-impact creatures and planeswalkers in the library before using Jace's −3; ")
+                          + (", ".join(polymorphs[:3]) + " can provide additional conversion attempts." if polymorphs else "Jace's −3 remains the main creature-cheat line.")
+                          + " Keep enough creature and planeswalker hits in the deck so the conversion effect does not whiff."),
+            "engine_heading": "Empower Jace and creature conversion",
+            "engine_details": (["Jace's −3 exiles another creature you control, then reveals until a creature or planeswalker is found; token makers are expendable fodder, not the payoff."]
+                               + (["Empower sources: " + ", ".join(empowers[:6]) + "."] if empowers else [])
+                               + (["Creature conversion effects: " + ", ".join(polymorphs[:6]) + "."] if polymorphs else [])),
+        }
+
+    # Dragon-token engine: Lathliss multiplies nontoken Dragon entries and dragon ETB payoffs.
+    if "another nontoken dragon you control enters" in commander_text.casefold() and "create a 5/5" in commander_text.casefold():
+        dragon_payoffs = [card["name"] for card, _ in selected
+                          if "dragon" in str(card.get("oracle_text") or "").casefold()
+                          and any(word in str(card.get("oracle_text") or "").casefold()
+                                  for word in ("enters", "attacks", "double strike", "extra combat"))]
+        dragon_ramp = [card["name"] for card, _ in selected
+                       if "dragon" in str(card.get("oracle_text") or "").casefold()
+                       and any(word in str(card.get("oracle_text") or "").casefold()
+                               for word in ("cost less", "add {", "treasure token"))]
+        return {
+            "primary_objective": "Accelerate into nontoken Dragons; Lathliss copies each Dragon entry as a 5/5 flyer, turning every threat into a wider board and amplifying Dragon-entry payoffs.",
+            "early_game": ("Prioritize mana rocks and Dragon-cost reducers before the expensive threats"
+                           + ((" (" + ", ".join(dragon_ramp[:5]) + ").") if dragon_ramp else ".")
+                           + (" Dragon's Hoard gains a gold counter per Dragon entry, then can cash a counter in for a card, so deploy it before the engine starts." if named("Dragon's Hoard") else "")),
+            "middle_game": ("With Lathliss on the battlefield, each nontoken Dragon creates an extra 5/5 flying Dragon token. "
+                            + ("Dragon Tempest grants haste to the flyers and deals damage for every Dragon entry." if named("Dragon Tempest") else "Use the added bodies to build a flying board and keep pressure through removal.")
+                            + ((" Other Dragon payoffs here include " + ", ".join(dragon_payoffs[:5]) + ".") if dragon_payoffs else "")),
+            "late_game": ("Convert the multiplied Dragon board into lethal attacks; "
+                          + ("Dragon Tempest and Scourge of Valkas turn repeated Dragon entries into direct damage." if named("Dragon Tempest") and named("Scourge of Valkas") else
+                             ("Dragon Tempest turns each Dragon entry into scalable damage." if named("Dragon Tempest") else "use the deck's listed Dragon-entry payoffs and combat finishers to close."))
+                          + (" Terror of Mount Velus grants your creatures double strike for a decisive combat." if named("Terror of Mount Velus") else "")),
+            "engine_heading": "Lathliss Dragon-token engine",
+            "engine_details": (["Lathliss makes one 5/5 flying Dragon whenever another nontoken Dragon enters; the token does not recursively trigger Lathliss."]
+                               + (["Dragon-entry payoffs: " + ", ".join(dragon_payoffs[:6]) + "."] if dragon_payoffs else [])
+                               + (["Dragon ramp/reducers: " + ", ".join(dragon_ramp[:6]) + "."] if dragon_ramp else [])),
+        }
+    return {}
+
+
 def deck_report(deck, cards, config=None):
     config = config or load_format(deck["format"])
     by_name = {card["name"]: card for card in cards}
@@ -369,12 +470,14 @@ def deck_report(deck, cards, config=None):
     curve = Counter()
     for card, count in selected:
         if "Land" not in card["type_line"]:
-            curve[int(min(card["mana_value"], 7))] += count
+            curve[int(min(float(card.get("mana_value") or 0), 7))] += count
         for role in _roles(card):
             roles[role].append(card["name"])
     large_threats = [card["name"] for card, _ in selected
                      if str(card.get("power", "")).isdigit() and float(card["power"]) >= 5]
     wins = list(dict.fromkeys(roles.get("finisher", []) + large_threats))
+    commander_cards = [card for card, _ in selected if card["name"] in deck.get("commanders", {})]
+    specific_plan = _primer_commander_plan(selected, commander_cards[0] if len(commander_cards) == 1 else None)
     limitations = []
     if len(wins) < 2:
         limitations.append("The owned pool does not expose two clearly distinct heuristic win conditions; review manually.")
@@ -393,6 +496,7 @@ def deck_report(deck, cards, config=None):
         "sideboard_strategy": ("Use interaction packages according to opponent speed, graveyard use, artifacts/enchantments, and threat profile."
                                if config["sideboard_max"] else "Commander has no conventional sideboard."),
     }
+    report.update(specific_plan)
     if deck["format"] == "commander":
         report["commander_bracket"] = classify_commander_bracket(deck)
     return report

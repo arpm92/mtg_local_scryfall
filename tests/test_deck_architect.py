@@ -120,6 +120,84 @@ class DeckArchitectTests(unittest.TestCase):
         self.assertIn("## Connive engine · 11 direct sources", text)
         self.assertIn("Red Room Recruit connives on entry.", text)
 
+    def test_doctor_doom_primer_explains_villain_connive_and_land_discard_engine(self):
+        commander = make_card(
+            "Doctor Doom, King of Latveria", quantity=1,
+            type_line="Legendary Creature — Human Villain",
+            text="Whenever you discard one or more land cards, each opponent loses 2 life. "
+                 "At the beginning of combat on your turn, target Villain you control gains menace "
+                 "until end of turn. It connives.",
+        )
+        prowler = make_card(
+            "Prowler, Clawed Thief", quantity=1,
+            type_line="Legendary Creature — Villain",
+            text="Whenever another Villain you control enters, Prowler connives.",
+        )
+        tombstone = make_card(
+            "Tombstone, Career Criminal", quantity=1,
+            type_line="Legendary Creature — Villain",
+            text="When Tombstone enters, return target Villain card from your graveyard to your hand. "
+                 "Villain spells you cast cost {1} less to cast.",
+        )
+        deck = {"name": "Doom", "format": "commander", "colors": ["U", "B", "R"],
+                "main": {prowler["name"]: 1, tombstone["name"]: 1},
+                "commanders": {commander["name"]: 1}}
+
+        report = engine.deck_report(deck, [commander, prowler, tombstone])
+
+        self.assertIn("connive", report["early_game"].casefold())
+        self.assertIn("Prowler, Clawed Thief", report["middle_game"])
+        self.assertIn("land", report["late_game"].casefold())
+        self.assertNotEqual(report["early_game"], "Develop mana and low-cost enablers while preserving interaction.")
+
+    def test_jace_primer_explains_empower_and_polymorph_lines(self):
+        commander = make_card(
+            "Jace, Multiverse Architect", quantity=1,
+            type_line="Legendary Planeswalker — Jace",
+            text="+1: Draw two cards, then put a card from your hand on the bottom of your library. "
+                 "−3: Exile another target creature you control. Reveal cards from the top of your library "
+                 "until you reveal a creature or planeswalker card. Put that card onto the battlefield.",
+        )
+        plan = make_card("Plan for All Outcomes", quantity=1, type_line="Enchantment",
+                         text="Whenever you cast your first noncreature spell each turn, empower Jace 1.")
+        token = make_card("Secure the Wastes", quantity=1, type_line="Instant",
+                          text="Create X 1/1 white Warrior creature tokens.")
+        polymorph = make_card("Polymorph", quantity=1, type_line="Sorcery",
+                              text="Destroy target creature. Its controller reveals cards from the top of their library until they reveal a creature card.")
+        deck = {"name": "Jace", "format": "commander", "colors": ["W", "U", "B", "R"],
+                "main": {plan["name"]: 1, token["name"]: 1, polymorph["name"]: 1},
+                "commanders": {commander["name"]: 1}}
+
+        report = engine.deck_report(deck, [commander, plan, token, polymorph])
+
+        self.assertIn("empower jace", report["early_game"].casefold())
+        self.assertIn("Secure the Wastes", report["middle_game"])
+        self.assertIn("Polymorph", report["late_game"])
+
+    def test_lathliss_primer_explains_dragon_token_and_entry_damage_synergy(self):
+        commander = make_card(
+            "Lathliss, Dragon Queen", quantity=1,
+            type_line="Legendary Creature — Dragon",
+            text="Flying. Whenever another nontoken Dragon you control enters, create a 5/5 red Dragon creature token with flying.",
+        )
+        tempest = make_card(
+            "Dragon Tempest", quantity=1, type_line="Enchantment",
+            text="Whenever a Dragon you control enters, it deals X damage to any target, where X is the number of Dragons you control.",
+        )
+        dragon = make_card("Atsushi, the Blazing Sky", quantity=1,
+                           type_line="Legendary Creature — Dragon", text="Flying")
+        hoard = make_card("Dragon's Hoard", quantity=1, type_line="Artifact",
+                          text="Whenever a Dragon you control enters, put a gold counter on Dragon's Hoard.")
+        deck = {"name": "Dragons", "format": "commander", "colors": ["R"],
+                "main": {tempest["name"]: 1, dragon["name"]: 1, hoard["name"]: 1},
+                "commanders": {commander["name"]: 1}}
+
+        report = engine.deck_report(deck, [commander, tempest, dragon, hoard])
+
+        self.assertIn("Dragon's Hoard", report["early_game"])
+        self.assertIn("5/5 flying Dragon", report["middle_game"])
+        self.assertIn("Dragon Tempest", report["late_game"])
+
     def test_rendered_report_includes_validation_packages_curve_and_sideboard_plan(self):
         text = engine.render_report({
             "name": "Primer Test", "format": "legacy",

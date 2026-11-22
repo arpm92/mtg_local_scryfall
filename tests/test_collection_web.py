@@ -133,13 +133,14 @@ class CollectionWebTests(unittest.TestCase):
         self.assertIn("source_scanned_name: state.deckInfo.name", app_script)
         self.assertIn("function onDeckFormatChange()", app_script)
 
-    def test_scanned_commander_cards_offer_direct_selection(self):
+    def test_scanned_commander_is_selected_from_card_details(self):
         index = (Path(web.ROOT) / "web" / "index.html").read_text(encoding="utf-8")
         app_script = (Path(web.ROOT) / "web" / "app.js").read_text(encoding="utf-8")
 
-        self.assertIn("data-select-commander=", app_script)
-        self.assertIn("Click a commander card in the main deck to select it", index)
-        self.assertIn("chooseScannedCommander(commander.dataset.selectCommander)", app_script)
+        self.assertIn('id="card-dialog"', index)
+        self.assertIn('id="scanned-commander-toggle"', app_script)
+        self.assertIn("data-commander-card=", app_script)
+        self.assertIn("chooseScannedCommander(toggle.checked ? toggle.dataset.commanderCard : '')", app_script)
 
     def test_loading_a_saved_deck_refreshes_and_renders_its_validation(self):
         app_script = (Path(web.ROOT) / "web" / "app.js").read_text(encoding="utf-8")
@@ -403,7 +404,7 @@ class CollectionWebTests(unittest.TestCase):
                 server.server_close()
                 thread.join(timeout=2)
 
-    def test_save_revalidates_allocations_and_does_not_write_on_shortage(self):
+    def test_save_keeps_deck_as_proposal_when_collection_has_shortage(self):
         architect = web.load_architect()
         cards = [
             {"name": "Owned Common Creature", "quantity": 2, "type_line": "Creature",
@@ -432,14 +433,14 @@ class CollectionWebTests(unittest.TestCase):
                 }).encode("utf-8")
                 request = Request("http://127.0.0.1:{}/api/decks".format(server.server_port),
                                   data=body, headers={"Content-Type": "application/json"})
-                with self.assertRaises(HTTPError) as caught:
-                    urlopen(request)
-                result = json.loads(caught.exception.read())
-                self.assertEqual(caught.exception.code, 400)
+                with urlopen(request) as response:
+                    result = json.loads(response.read())
+                self.assertEqual(result["deck"]["ownership_mode"], "proposal")
+                self.assertFalse(result["validation"]["collection_complete"])
                 self.assertEqual(result["validation"]["allocation_report"][0]["locations"], [
                     {"deck": "Shang-Chi counters", "copies": 1}
                 ])
-                self.assertFalse((self.root / "outputs" / "pauper").exists())
+                self.assertTrue((self.root / "outputs" / "pauper").exists())
             finally:
                 server.shutdown()
                 server.server_close()
