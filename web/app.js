@@ -376,7 +376,7 @@ function renderDeckFormatAnalysis() {
       else unknown += count;
     }
     const status = notLegal ? `${notLegal} not legal` : unknown ? `${unknown} unknown` : 'All cards legal';
-    return `<div class="format-analysis-row"><b>${label}</b><span>${legal}/${entries.reduce((sum, [,count]) => sum + count, 0)} legal · ${escapeHtml(status)}</span></div>`;
+    return `<button class="format-analysis-row" type="button" data-legality-format="${key}" data-legality-label="${label}" aria-label="Show cards not legal in ${label}"><b>${label}</b><span>${legal}/${entries.reduce((sum, [,count]) => sum + count, 0)} legal · ${escapeHtml(status)}</span></button>`;
   }).join('');
   const compatible = state.deckInfo.compatible_formats || [];
   const commanderCandidates = state.deckInfo.format_analysis?.commander_candidates || [];
@@ -386,6 +386,30 @@ function renderDeckFormatAnalysis() {
   const commanderNote = commanderCandidates.length ? `<p class="format-analysis-note">Commander scan candidates that pass full deck validation: ${commanderCandidates.map(escapeHtml).join(', ')}.</p>` : '';
   section.innerHTML = `<h2>Card legality by format</h2><p>Per-card Scryfall legality for the cards in this deck; deck-size and other rules are checked separately.</p><div class="format-analysis-grid">${result}</div><p class="format-analysis-note">Pauper legality is card-level: a card qualifies if it has a common printing, even when the copy you own is an uncommon or rare printing.</p>${wholeDeck}${commanderNote}`;
   section.hidden = false;
+}
+function showFormatLegality(formatKey, formatLabel) {
+  const placements = ['main', 'sideboard', 'commanders'].flatMap(section =>
+    Object.entries(state.deck[section] || {}).map(([name, quantity]) => ({section, name, quantity}))
+  );
+  const lookup = new Map(state.all.map(card => [card.name, card]));
+  const notLegal = [];
+  const unknown = [];
+  for (const item of placements) {
+    const card = lookup.get(item.name);
+    const legality = card?.legalities?.[formatKey] || 'unknown';
+    const row = {...item, legality};
+    if (legality === 'not_legal' || legality === 'banned') notLegal.push(row);
+    else if (legality !== 'legal' && legality !== 'restricted') unknown.push(row);
+  }
+  const zoneName = {main: 'Main deck', sideboard: 'Sideboard', commanders: 'Commander'};
+  const renderRows = rows => rows.map(item => `<tr><th scope="row">${escapeHtml(item.name)}</th><td>${escapeHtml(zoneName[item.section])} · ×${Number(item.quantity)}</td><td>${item.legality === 'banned' ? 'Banned' : item.legality === 'not_legal' ? 'Not legal' : 'Unknown'}</td></tr>`).join('');
+  const content = [];
+  if (notLegal.length) content.push(`<h3>Not legal in ${escapeHtml(formatLabel)} (${notLegal.length})</h3><div class="legality-table-wrap"><table class="legality-table"><thead><tr><th>Card</th><th>Deck section and copies</th><th>Status</th></tr></thead><tbody>${renderRows(notLegal)}</tbody></table></div>`);
+  if (unknown.length) content.push(`<h3>Legality unknown (${unknown.length})</h3><div class="legality-table-wrap"><table class="legality-table"><thead><tr><th>Card</th><th>Deck section and copies</th><th>Status</th></tr></thead><tbody>${renderRows(unknown)}</tbody></table></div>`);
+  $('#legality-dialog-title').textContent = `Cards not legal in ${formatLabel}`;
+  $('#legality-dialog-note').textContent = 'This is a per-card Scryfall legality check. Deck size, copy limits, and other format rules are evaluated separately.';
+  $('#legality-dialog-cards').innerHTML = content.join('') || `<p class="legality-empty">All ${placements.length} card entries are marked legal for ${escapeHtml(formatLabel)}.</p>`;
+  $('#legality-dialog').showModal();
 }
 function renderDeckBuilder() {
   const format = $('#deck-format').value; const scanned = isScannedSource();
@@ -698,6 +722,14 @@ $('#dialog-content').addEventListener('change', event => {
   if (!toggle) return;
   chooseScannedCommander(toggle.checked ? toggle.dataset.commanderCard : '');
 });
+$('#deck-format-analysis').addEventListener('click', event => {
+  const row = event.target.closest('[data-legality-format]');
+  if (row) showFormatLegality(row.dataset.legalityFormat, row.dataset.legalityLabel);
+});
+const legalityDialog = $('#legality-dialog');
+$('#close-legality').addEventListener('click', () => legalityDialog.close());
+$('#close-legality-footer').addEventListener('click', () => legalityDialog.close());
+legalityDialog.addEventListener('click', event => { if (event.target === legalityDialog) legalityDialog.close(); });
 document.querySelectorAll('[data-deck-view]').forEach(button => button.addEventListener('click', () => { state.deckView = button.dataset.deckView; document.querySelectorAll('[data-deck-view]').forEach(item => { const active = item === button; item.classList.toggle('active', active); item.setAttribute('aria-pressed', String(active)); }); renderDeckBuilder(); }));
 $('#deck-search').addEventListener('input', renderDeckBuilder); $('#deck-format').addEventListener('change', onDeckFormatChange); $('#scanned-commander').addEventListener('change', event => chooseScannedCommander(event.target.value)); $('#deck-name').addEventListener('input', clearDeckValidation); $('#new-deck').addEventListener('click', newDeck); $('#create-deck').addEventListener('click', createNewDeck); $('#validate-deck').addEventListener('click', validateDeck); $('#save-deck').addEventListener('click', saveDeck);
 

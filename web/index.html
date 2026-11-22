@@ -182,6 +182,17 @@
     <div id="dialog-content"></div>
   </dialog>
 
+  <dialog id="legality-dialog" class="legality-dialog" aria-labelledby="legality-dialog-title">
+    <button id="close-legality" class="dialog-close" type="button" aria-label="Close legality details">×</button>
+    <section class="legality-dialog-content">
+      <p class="eyebrow">Card legality</p>
+      <h2 id="legality-dialog-title">Format card check</h2>
+      <p id="legality-dialog-note" class="muted"></p>
+      <div id="legality-dialog-cards"></div>
+      <div class="import-actions"><button id="close-legality-footer" class="subtle-button" type="button">Close</button></div>
+    </section>
+  </dialog>
+
   <dialog id="import-dialog" class="import-dialog">
     <button id="close-import" class="dialog-close" type="button" aria-label="Close">×</button>
     <form id="import-form" class="import-form">
