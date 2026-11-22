@@ -839,9 +839,11 @@ def make_handler(payload, architect=None, engine_cards=None, auth_username="", a
                         validation = validate_deck_allocations(
                             deck, state["engine_cards"], self.saved_decks(), architect
                         )
-                        if not validation["valid"]:
-                            self.send_json(422, {"error": "Generated deck failed validation and cannot be saved.", "validation": validation})
-                            return
+                        if any(item.get("shortage") for item in validation.get("allocation_report", [])):
+                            deck["ownership_mode"] = "proposal"
+                            validation = validate_deck_allocations(
+                                deck, state["engine_cards"], self.saved_decks(), architect
+                            )
                         deck["validation"] = validation
                         self.send_json(200, {"answer": created["answer"], "deckDraft": deck})
                         return
@@ -852,18 +854,34 @@ def make_handler(payload, architect=None, engine_cards=None, auth_username="", a
                 validation = validate_deck_allocations(
                     deck, state.get("engine_cards", []), self.saved_decks(), architect
                 )
+                if any(item.get("shortage") for item in validation.get("allocation_report", [])):
+                    # An incomplete list can still be saved for planning, but must not reserve
+                    # more owned copies or block other decks from using the collection.
+                    deck["ownership_mode"] = "proposal"
+                    validation = validate_deck_allocations(
+                        deck, state.get("engine_cards", []), self.saved_decks(), architect
+                    )
                 deck["validation"] = validation
-                if not validation["valid"]:
-                    self.send_json(400, {"error": "Deck is not valid.", "validation": validation})
-                    return
                 submitted_report = submitted.get("report")
-                deck["report"] = (submitted_report if isinstance(submitted_report, dict)
-                                   else architect.deck_report(deck, state["engine_cards"]))
+                if isinstance(submitted_report, dict):
+                    deck["report"] = submitted_report
+                else:
+                    if not deck.get("colors"):
+                        by_name = {str(card.get("name") or "").casefold(): card
+                                   for card in state["engine_cards"]}
+                        identity = {
+                            color
+                            for section in ("main", "commanders")
+                            for name in (deck.get(section) or {})
+                            for color in by_name.get(str(name).casefold(), {}).get("color_identity", [])
+                        }
+                        deck["colors"] = [color for color in "WUBRG" if color in identity]
+                    deck["report"] = architect.deck_report(deck, state["engine_cards"])
                 source_scanned_name = deck.pop("source_scanned_name", "")
                 files = architect.save_bundle(deck, state["engine_cards"], ROOT / "outputs")
                 if source_scanned_name:
                     import_store.remove_scanned_deck(source_scanned_name)
-                self.send_json(201, {"deck": deck, "files": files})
+                self.send_json(201, {"deck": deck, "validation": validation, "files": files})
             except (ValueError, TypeError, UnicodeDecodeError, json.JSONDecodeError) as error:
                 self.send_json(400, {"error": str(error)})
             except (RuntimeError, TimeoutError, OSError) as error:

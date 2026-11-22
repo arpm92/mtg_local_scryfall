@@ -139,13 +139,19 @@ function render() {
 }
 function openCard(index) {
   const card = state.all.find(item => item.index === index); if (!card) return;
+  const scannedCommanderCandidate = isScannedSource() && $('#deck-format').value === 'commander'
+    && Boolean(card.commanderCandidate)
+    && Boolean(state.deck.main[card.name] || state.deck.commanders[card.name]);
+  const commanderControl = scannedCommanderCandidate
+    ? `<label class="scanned-commander-toggle"><input id="scanned-commander-toggle" type="checkbox" data-commander-card="${escapeHtml(card.name)}" ${state.deck.commanders[card.name] ? 'checked' : ''}><span>Set as commander for this deck scan</span></label>`
+    : '';
   const tags = [card.rarity, card.foil, card.language, `MV ${card.manaValue}`, card.commander === 'legal' ? 'Commander legal' : 'Not Commander legal'].filter(Boolean);
   const availability = card.availability || {totalOwned: card.quantity, reserved: 0, available: card.quantity, shortage: 0, reservedByDeck: []};
   const reservations = availability.reservedByDeck.map(item => `<li><span>${escapeHtml(item.name)}</span><b>${item.quantity} reserved</b></li>`).join('');
   const availabilityView = `<section class="card-availability"><h3>Copy availability</h3><p><strong>${availability.available}</strong> available · ${availability.reserved} reserved · ${availability.totalOwned} owned</p>${availability.shortage ? `<p class="availability-warning">${availability.shortage} more reserved than owned</p>` : ''}${reservations ? `<ul>${reservations}</ul>` : '<p class="muted">No saved deck reserves this card.</p>'}</section>`;
   const art = card.imageUrl ? `<img src="${escapeHtml(card.imageUrl)}" alt="${escapeHtml(card.name)}">` : '<div class="dialog-art-placeholder"></div>';
   const rows = card.printings.map(p => `<tr><td>${p.imageUrl ? `<a class="printing-image-link" href="${escapeHtml(p.scryfallUrl || p.imageUrl)}" target="_blank" rel="noopener" title="Open this exact printing"><img class="printing-image" src="${escapeHtml(p.imageUrl)}" alt="${escapeHtml(card.name)} ${escapeHtml(p.setCode)} printing" loading="lazy"></a>` : ''}</td><td>${escapeHtml(p.setCode.toUpperCase())} #${escapeHtml(p.collectorNumber)}</td><td>${escapeHtml(p.rarity)}</td><td>${escapeHtml(p.foil || 'normal')}</td><td>${escapeHtml(p.language)}</td><td>&times;${p.quantity}</td></tr>`).join('');
-  $('#dialog-content').innerHTML = `<div class="dialog-layout">${art}<div class="dialog-copy"><h2>${escapeHtml(card.name)}</h2><p class="dialog-meta">${card.printings.length} owned printing${card.printings.length === 1 ? '' : 's'} · ${card.quantity} copies</p><p>${escapeHtml(card.manaCost)}</p><p class="dialog-type">${escapeHtml(card.typeLine)}</p><p class="dialog-rules">${escapeHtml(card.oracleText) || '<i>No rules text</i>'}</p><div class="dialog-tags">${tags.map(x => `<span>${escapeHtml(x)}</span>`).join('')}</div>${availabilityView}<h3 class="printing-title">Owned printings</h3><table class="printing-list"><thead><tr><th>Art</th><th>Printing</th><th>Rarity</th><th>Finish</th><th>Lang</th><th>Qty</th></tr></thead><tbody>${rows}</tbody></table>${card.scryfallUrl ? `<p><a class="scryfall-link" href="${escapeHtml(card.scryfallUrl)}" target="_blank" rel="noopener">Open on Scryfall ↗</a></p>` : ''}</div></div>`;
+  $('#dialog-content').innerHTML = `<div class="dialog-layout">${art}<div class="dialog-copy"><h2>${escapeHtml(card.name)}</h2><p class="dialog-meta">${card.printings.length} owned printing${card.printings.length === 1 ? '' : 's'} · ${card.quantity} copies</p>${commanderControl}<p>${escapeHtml(card.manaCost)}</p><p class="dialog-type">${escapeHtml(card.typeLine)}</p><p class="dialog-rules">${escapeHtml(card.oracleText) || '<i>No rules text</i>'}</p><div class="dialog-tags">${tags.map(x => `<span>${escapeHtml(x)}</span>`).join('')}</div>${availabilityView}<h3 class="printing-title">Owned printings</h3><table class="printing-list"><thead><tr><th>Art</th><th>Printing</th><th>Rarity</th><th>Finish</th><th>Lang</th><th>Qty</th></tr></thead><tbody>${rows}</tbody></table>${card.scryfallUrl ? `<p><a class="scryfall-link" href="${escapeHtml(card.scryfallUrl)}" target="_blank" rel="noopener">Open on Scryfall ↗</a></p>` : ''}</div></div>`;
   $('#card-dialog').showModal();
 }
 
@@ -274,14 +280,11 @@ function deckVisualCard(name, count, section) {
   const art = card?.imageUrl
     ? `<img src="${escapeHtml(card.imageUrl)}" alt="${escapeHtml(name)}" loading="lazy">`
     : `<span class="deck-art-fallback">${escapeHtml(name)}</span>`;
-  const selectingCommander = isScannedSource() && $('#deck-format').value === 'commander'
-    && section === 'main' && card?.commanderCandidate;
   const preview = card ? `data-preview-index="${card.index}"` : '';
-  const selectCommander = selectingCommander ? `data-select-commander="${escapeHtml(name)}"` : '';
   const actions = state.deckInfo?.format === 'scanned' ? '' : `<span class="deck-card-actions"><button type="button" data-remove="${section}" data-card="${escapeHtml(name)}" aria-label="Remove ${escapeHtml(name)}">−</button><button type="button" data-add="${section}" data-card="${escapeHtml(name)}" aria-label="Add another ${escapeHtml(name)}">+</button></span>`;
   return `<article class="deck-visual-card">
     <span class="deck-qty">${count}×</span>
-    <button class="deck-card-art ${selectingCommander ? 'deck-commander-selectable' : ''}" type="button" ${preview} ${selectCommander} aria-label="${selectingCommander ? `Set ${escapeHtml(name)} as commander` : `View ${escapeHtml(name)}`} ">${art}${selectingCommander ? '<span class="select-commander-overlay">Set as commander</span>' : ''}</button>
+    <button class="deck-card-art" type="button" ${preview} aria-label="View ${escapeHtml(name)}">${art}</button>
     ${actions}
     <span class="deck-visual-name" title="${escapeHtml(name)}">${escapeHtml(name)}</span>
   </article>`;
@@ -323,12 +326,17 @@ function renderTokens() {
     <span class="token-source">Created by ${[...token.createdBy].map(escapeHtml).join(', ')}</span>
   </article>`).join('')}</div>` : '<p class="muted">No tokens or emblems are referenced by the current deck.</p>';
 }
+let deckValidationPanelOpen = true;
+let deckPrimerPanelOpen = true;
+
 function renderDeckPrimer() {
   const report = state.deckInfo?.report;
   if (!report) {
-    $('#deck-primer').innerHTML = Object.keys(state.deck.main).length ? '<p>Validate and save this deck to generate its strategy and winning-condition summary.</p>' : '';
+    $('#deck-primer').innerHTML = Object.keys(state.deck.main).length ? '<p>Save this deck to generate its strategy and winning-condition summary. Validation issues stay visible, but won’t block saving.</p>' : '';
     return;
   }
+  const priorPanel = $('#deck-primer details');
+  if (priorPanel) deckPrimerPanelOpen = priorPanel.open;
   const wins = report.win_conditions || [];
   const engineDetails = report.engine_details || [];
   const packageRows = [
@@ -344,13 +352,14 @@ function renderDeckPrimer() {
   const curve = report.mana_curve && typeof report.mana_curve === 'object'
     ? Object.entries(report.mana_curve).map(([mv, count]) => `${mv} mana: ${count}`).join(' · ') : '';
   const curveMarkup = curve ? `<p class="primer-curve"><strong>Mana curve:</strong> ${escapeHtml(curve)} · ${Number(report.land_count || 0)} lands</p>` : '';
-  $('#deck-primer').innerHTML = `<div class="deck-primer-header"><div><span class="primer-label">Deck primer</span><h2>${escapeHtml(state.deckInfo.archetype || 'Deck strategy')}</h2></div><span class="primer-label">${escapeHtml(report.identity || '')}</span></div>
+  $('#deck-primer').innerHTML = `<details class="primer-collapsible" ${deckPrimerPanelOpen ? 'open' : ''}><summary class="primer-summary"><div class="deck-primer-header"><div><span class="primer-label">Deck primer</span><h2>${escapeHtml(state.deckInfo.archetype || 'Deck strategy')}</h2><p class="primer-summary-objective">${escapeHtml(report.primary_objective || '')}</p></div><span class="primer-identity"><span class="primer-label">${escapeHtml(report.identity || '')}</span><span class="deck-collapse-indicator" aria-hidden="true"></span></span></div></summary><div class="primer-content">
     <p>${escapeHtml(report.primary_objective || '')}</p>
     <div class="primer-path"><div><strong>Early game</strong>${escapeHtml(report.early_game || '')}</div><div><strong>Mid game</strong>${escapeHtml(report.middle_game || '')}</div><div><strong>Late game</strong>${escapeHtml(report.late_game || '')}</div></div>
     ${engineDetails.length ? `<div class="primer-engine"><strong>${escapeHtml(report.engine_heading || 'Synergy engine')}</strong><ul>${engineDetails.map(detail => `<li>${escapeHtml(detail)}</li>`).join('')}</ul></div>` : ''}
     <p><strong>Winning conditions</strong></p><div class="primer-wins">${wins.length ? wins.map(name => `<span>${escapeHtml(name)}</span>`).join('') : '<span>No distinct finishers detected</span>'}</div>
     ${packageMarkup}${estimateMarkup}${curveMarkup}${weaknessMarkup}
-    ${report.sideboard_strategy ? `<p class="primer-sideboard"><strong>Sideboard:</strong> ${escapeHtml(report.sideboard_strategy)}</p>` : ''}`;
+    ${report.sideboard_strategy ? `<p class="primer-sideboard"><strong>Sideboard:</strong> ${escapeHtml(report.sideboard_strategy)}</p>` : ''}</div></details>`;
+  $('#deck-primer details').addEventListener('toggle', event => { deckPrimerPanelOpen = event.currentTarget.open; });
 }
 function renderDeckFormatAnalysis() {
   const section = $('#deck-format-analysis');
@@ -375,15 +384,18 @@ function renderDeckFormatAnalysis() {
     ? `<p class="format-analysis-note">Full deck rules and legality pass: ${compatible.map(name => name[0].toUpperCase() + name.slice(1)).join(', ')}.</p>`
     : '<p class="format-analysis-note">Full deck validation is available for Commander, Pauper, Standard, and Legacy. Select a format and choose a commander (if needed), then use Validate deck.</p>';
   const commanderNote = commanderCandidates.length ? `<p class="format-analysis-note">Commander scan candidates that pass full deck validation: ${commanderCandidates.map(escapeHtml).join(', ')}.</p>` : '';
-  section.innerHTML = `<h2>Card legality by format</h2><p>Per-card Scryfall legality for the cards in this deck; deck-size and other rules are checked separately.</p><div class="format-analysis-grid">${result}</div>${wholeDeck}${commanderNote}`;
+  section.innerHTML = `<h2>Card legality by format</h2><p>Per-card Scryfall legality for the cards in this deck; deck-size and other rules are checked separately.</p><div class="format-analysis-grid">${result}</div><p class="format-analysis-note">Pauper legality is card-level: a card qualifies if it has a common printing, even when the copy you own is an uncommon or rare printing.</p>${wholeDeck}${commanderNote}`;
   section.hidden = false;
 }
 function renderDeckBuilder() {
   const format = $('#deck-format').value; const scanned = isScannedSource();
+  $('.deck-workspace').classList.toggle('deck-workspace-scanned', scanned);
   const config = state.formats[format] || {main_size: 0, sideboard_target: 0, commander_min: 0};
   $('#deck-name').readOnly = false; $('#deck-format').disabled = false;
   $('#save-deck').disabled = !state.validatedDeckFingerprint
     || state.validatedDeckFingerprint !== deckFingerprint(deckPayload());
+  $('#save-deck').textContent = state.deckValidation && (!state.deckValidation.valid || state.deckValidation.collection_complete === false)
+    ? 'Save as draft' : 'Save deck';
   $('#simulate-deck').disabled = !state.deckInfo || scanned || format === 'scanned' || !state.simulationAvailable;
   $('#test-hand').disabled = !state.deckInfo || scanned || format === 'scanned';
   updateBattleButton();
@@ -453,6 +465,8 @@ function deckFingerprint(payload) {
     sideboard: sortedSection('sideboard'), commanders: sortedSection('commanders')});
 }
 function renderDeckValidation(validation) {
+  const priorPanel = $('#deck-validation details');
+  if (priorPanel) deckValidationPanelOpen = priorPanel.open;
   const report = validation.allocation_report || [];
   const errors = validation.errors || [];
   const rows = new Map();
@@ -497,13 +511,14 @@ function renderDeckValidation(validation) {
     ? 'Format, deck size, and legality pass. Quantity gaps remain; this proposal reserves no collection copies.'
     : validation.valid
       ? 'Format, card counts, legality, and collection availability pass.'
-      : `${issueCount} issue${issueCount === 1 ? '' : 's'} to fix before saving.`;
+      : `${issueCount} format or availability issue${issueCount === 1 ? '' : 's'}. You can still save this deck as a draft and generate its strategy summary.`;
   const table = `<div class="validation-table-wrap"><table class="validation-results-table"><thead><tr><th scope="col">Card</th><th scope="col">Note</th><th scope="col">Where found</th></tr></thead><tbody>${rowMarkup}</tbody></table></div>`;
   const resultLabel = validation.valid && validation.collection_complete === false ? 'Format passed · quantity gaps'
     : validation.valid ? 'Passed' : `${issueCount} issues`;
   const resultClass = !validation.valid ? 'has-errors'
     : validation.collection_complete === false ? 'has-warnings' : 'is-valid';
-  $('#deck-validation').innerHTML = `<div class="validation-heading"><div><p class="eyebrow">Deck check</p><h3>Validation results</h3></div><span class="validation-count ${resultClass}">${resultLabel}</span></div><p class="deck-validation-summary">${escapeHtml(summary)}</p>${table}`;
+  $('#deck-validation').innerHTML = `<details class="validation-collapsible" ${deckValidationPanelOpen ? 'open' : ''}><summary class="validation-heading"><div><p class="eyebrow">Deck check</p><h3>Validation results</h3></div><span class="validation-count ${resultClass}">${resultLabel}</span><span class="deck-collapse-indicator" aria-hidden="true"></span></summary><div class="validation-content"><p class="deck-validation-summary">${escapeHtml(summary)}</p>${table}</div></details>`;
+  $('#deck-validation details').addEventListener('toggle', event => { deckValidationPanelOpen = event.currentTarget.open; });
   $('#deck-validation').hidden = false;
 }
 function renderScannedCommanderPicker() {
@@ -630,17 +645,18 @@ async function validateDeck() {
     if (!response.ok) throw new Error(result.error || 'Could not validate this deck.');
     const validation = result.validation || {};
     state.deckValidation = validation;
+    state.validatedDeckFingerprint = fingerprint;
     renderDeckValidation(validation);
     if (!validation.valid) {
-      status.classList.add('error'); status.textContent = 'Validation found issues. Review the results table below.';
+      status.classList.add('error'); status.textContent = 'Validation found issues. Review the table, then save as a draft to keep the deck and generate its strategy summary.';
+      renderDeckBuilder();
       return;
     }
-    state.validatedDeckFingerprint = fingerprint;
-    $('#save-deck').disabled = false;
     status.classList.add(validation.collection_complete === false ? 'error' : 'success');
     status.textContent = validation.collection_complete === false
-      ? 'Format passed with collection quantity gaps. This proposal will not reserve copies; save when you are ready.'
+      ? 'Format passed with collection quantity gaps. This can be saved as a proposal without reserving copies.'
       : 'Validation passed. Save the deck when you are ready.';
+    renderDeckBuilder();
   } catch (error) { status.classList.add('error'); status.textContent = error.message; }
 }
 async function saveDeck() {
@@ -659,18 +675,28 @@ async function saveDeck() {
       throw new Error((result.validation?.errors || [result.error]).join(' '));
     }
     state.deckInfo = result.deck; state.reservationDeck = {name: result.deck.name, format: result.deck.format};
-    clearDeckValidation();
-    await reloadCollection(); renderDeckBuilder(); status.classList.add('success'); status.textContent = `Saved and exported to outputs/${payload.format}.`;
+    state.deckValidation = result.validation || result.deck.validation || state.deckValidation;
+    state.validatedDeckFingerprint = null;
+    await reloadCollection(); renderDeckBuilder();
+    if (state.deckValidation) renderDeckValidation(state.deckValidation);
+    const incomplete = state.deckValidation && (!state.deckValidation.valid || state.deckValidation.collection_complete === false);
+    status.classList.add('success');
+    status.textContent = incomplete
+      ? `Saved as a draft and exported to outputs/${payload.format}. Review the validation table; the strategy and winning conditions are below.`
+      : `Saved and exported to outputs/${payload.format}. Strategy and winning conditions are below.`;
     state.savedDecks = await fetch('/api/decks').then(r => r.json()); renderSavedDecks();
   } catch (error) { status.classList.add('error'); status.textContent = error.message; }
 }
 $('#deck-card-list').addEventListener('click', event => { const button = event.target.closest('[data-add]'); if (button) addToDeck(button.dataset.card, button.dataset.add); });
 $('.deck-list-panel').addEventListener('click', event => { const add = event.target.closest('[data-add]'); const remove = event.target.closest('[data-remove]'); if (add) addToDeck(add.dataset.card, add.dataset.add); if (remove) removeFromDeck(remove.dataset.card, remove.dataset.remove); });
 $('#decks-view').addEventListener('click', event => {
-  const commander = event.target.closest('[data-select-commander]');
-  if (commander) { event.preventDefault(); chooseScannedCommander(commander.dataset.selectCommander); return; }
   const preview = event.target.closest('[data-preview-index]');
   if (preview) openCard(Number(preview.dataset.previewIndex));
+});
+$('#dialog-content').addEventListener('change', event => {
+  const toggle = event.target.closest('#scanned-commander-toggle');
+  if (!toggle) return;
+  chooseScannedCommander(toggle.checked ? toggle.dataset.commanderCard : '');
 });
 document.querySelectorAll('[data-deck-view]').forEach(button => button.addEventListener('click', () => { state.deckView = button.dataset.deckView; document.querySelectorAll('[data-deck-view]').forEach(item => { const active = item === button; item.classList.toggle('active', active); item.setAttribute('aria-pressed', String(active)); }); renderDeckBuilder(); }));
 $('#deck-search').addEventListener('input', renderDeckBuilder); $('#deck-format').addEventListener('change', onDeckFormatChange); $('#scanned-commander').addEventListener('change', event => chooseScannedCommander(event.target.value)); $('#deck-name').addEventListener('input', clearDeckValidation); $('#new-deck').addEventListener('click', newDeck); $('#create-deck').addEventListener('click', createNewDeck); $('#validate-deck').addEventListener('click', validateDeck); $('#save-deck').addEventListener('click', saveDeck);
@@ -961,7 +987,11 @@ $('#simulation-form').addEventListener('submit', startSimulation);
 $('#saved-decks').addEventListener('click', event => { const remove = event.target.closest('[data-delete-deck]'); const button = event.target.closest('[data-saved]'); if (remove) deleteDeck(Number(remove.dataset.deleteDeck)); else if (button) loadSavedDeck(state.savedDecks[Number(button.dataset.saved)]); });
 function renderChat() {
   const log = $('#chat-messages');
-  log.innerHTML = state.chatMessages.map((item, index) => `<article class="chat-message ${item.role === 'user' ? 'user' : 'assistant'}"><strong>${item.role === 'user' ? 'You' : 'Codex'}</strong><div class="chat-message-body">${item.role === 'assistant' ? renderMarkdown(item.content) : `<p>${escapeHtml(item.content).replace(/\n/g, '<br>')}</p>`}</div>${item.deckDraft ? `<p class="chat-draft-summary">Validated ${escapeHtml(item.deckDraft.format)} draft · ${Object.values(item.deckDraft.main || {}).reduce((sum, count) => sum + Number(count || 0), 0)} main deck cards</p><button class="chat-save-deck" type="button" data-chat-save-deck="${index}" ${item.savingDeck ? 'disabled' : ''}>${item.savingDeck ? 'Saving…' : 'Save deck to Decks'}</button>${item.saveError ? `<p class="chat-save-error" role="alert">${escapeHtml(item.saveError)}</p>` : ''}` : ''}${item.savedDeck ? `<button class="chat-open-deck" type="button" data-chat-open-deck="${escapeHtml(item.savedDeck.name)}" data-chat-open-format="${escapeHtml(item.savedDeck.format)}">Open saved deck in Decks</button>` : ''}</article>`).join('');
+  const draftStatus = deck => !deck.validation ? 'Draft'
+    : !deck.validation.valid ? 'Needs format review'
+      : deck.validation.collection_complete === false ? 'Format passed · quantity proposal'
+        : 'Validated';
+  log.innerHTML = state.chatMessages.map((item, index) => `<article class="chat-message ${item.role === 'user' ? 'user' : 'assistant'}"><strong>${item.role === 'user' ? 'You' : 'Codex'}</strong><div class="chat-message-body">${item.role === 'assistant' ? renderMarkdown(item.content) : `<p>${escapeHtml(item.content).replace(/\n/g, '<br>')}</p>`}</div>${item.deckDraft ? `<p class="chat-draft-summary">${draftStatus(item.deckDraft)} ${escapeHtml(item.deckDraft.format)} draft · ${Object.values(item.deckDraft.main || {}).reduce((sum, count) => sum + Number(count || 0), 0)} main deck cards</p><button class="chat-save-deck" type="button" data-chat-save-deck="${index}" ${item.savingDeck ? 'disabled' : ''}>${item.savingDeck ? 'Saving…' : 'Save deck to Decks'}</button>${item.saveError ? `<p class="chat-save-error" role="alert">${escapeHtml(item.saveError)}</p>` : ''}` : ''}${item.savedDeck ? `<button class="chat-open-deck" type="button" data-chat-open-deck="${escapeHtml(item.savedDeck.name)}" data-chat-open-format="${escapeHtml(item.savedDeck.format)}">Open saved deck in Decks</button>` : ''}</article>`).join('');
   log.scrollTop = log.scrollHeight;
 }
 async function saveChatDeck(index) {
