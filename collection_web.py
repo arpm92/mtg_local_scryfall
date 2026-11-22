@@ -40,6 +40,170 @@ def load_architect():
     return module
 
 
+def deck_compatible_formats(deck, cards, architect):
+    """Return formats in which the deck's cards and structure pass validation."""
+    if not isinstance(deck, dict):
+        return []
+    validator = getattr(architect, "validate_deck", None)
+    if not callable(validator):
+        return []
+    if deck.get("format") == "scanned":
+        compatible = []
+        for format_name in ("pauper", "standard", "legacy"):
+            candidate = dict(deck, format=format_name, sideboard={}, commanders={})
+            try:
+                if validator(candidate, cards, format_name=format_name, respect_ownership=False).get("valid"):
+                    compatible.append(format_name)
+            except (KeyError, TypeError, ValueError):
+                pass
+        by_name = {str(card.get("name") or "").casefold(): card for card in cards}
+        commander_candidates = []
+        for card_name, count in (deck.get("main") or {}).items():
+            card = by_name.get(str(card_name).casefold())
+            if count and card and getattr(architect, "is_commander", lambda value: False)(card):
+                candidate = dict(deck, format="commander", main=dict(deck.get("main") or {}),
+                                 sideboard={}, commanders={str(card_name): 1})
+                candidate["main"][card_name] -= 1
+                if candidate["main"][card_name] <= 0:
+                    del candidate["main"][card_name]
+                try:
+                    if validator(candidate, cards, format_name="commander", respect_ownership=False).get("valid"):
+                        commander_candidates.append(str(card_name))
+                except (KeyError, TypeError, ValueError):
+                    pass
+        if commander_candidates:
+            compatible.append("commander")
+        deck["format_analysis"] = {
+            "commander_candidates": commander_candidates,
+            "checked_formats": ["commander", "pauper", "standard", "legacy"],
+        }
+        return compatible
+    has_commander_section = bool(deck.get("commanders"))
+    compatible = []
+    for format_name in ("commander", "pauper", "standard", "legacy"):
+        if (format_name == "commander") != has_commander_section:
+            continue
+        try:
+            result = validator(deck, cards, format_name=format_name, respect_ownership=False)
+        except (KeyError, TypeError, ValueError):
+            continue
+        if result.get("valid"):
+            compatible.append(format_name)
+    return compatible
+
+
+def deck_from_submission(submitted):
+    """Normalize a deck request shared by validation and save endpoints."""
+    format_name = str(submitted.get("format") or "").casefold()
+    if format_name not in ("commander", "pauper", "standard", "legacy"):
+        raise ValueError("Choose Commander, Pauper, Standard, or Legacy.")
+    deck = {
+        "name": str(submitted.get("name") or "Untitled Deck").strip()[:100],
+        "format": format_name,
+        "main": submitted.get("main") or {},
+        "sideboard": submitted.get("sideboard") or {},
+        "commanders": submitted.get("commanders") or {},
+        "colors": submitted.get("colors") or [],
+        "archetype": str(submitted.get("archetype") or "Website build")[:100],
+        "power_target": str(submitted.get("power_target") or "")[:100],
+        "source_scanned_name": str(submitted.get("source_scanned_name") or "").strip()[:100],
+    }
+    for section in ("main", "sideboard", "commanders"):
+        if not isinstance(deck[section], dict):
+            raise ValueError("Deck sections must be card/count objects.")
+        deck[section] = {
+            str(card): int(count) for card, count in deck[section].items() if int(count) > 0
+        }
+    return deck
+
+
+def validate_deck_allocations(deck, cards, existing_decks, architect):
+    """Validate format rules and report owned copies reserved in other decks."""
+    name_key = re.sub(r"\s+", " ", str(deck.get("name") or "")).strip().casefold()
+    format_name = str(deck.get("format") or "").casefold()
+    current_deck = next((item for item in existing_decks or ()
+                         if re.sub(r"\s+", " ", str(item.get("name") or "")).strip().casefold() == name_key
+                         and str(item.get("format") or "").casefold() == format_name), None)
+    source_scanned_name = re.sub(r"\s+", " ", str(deck.get("source_scanned_name") or "")).strip().casefold()
+    if source_scanned_name:
+        current_deck = next((item for item in existing_decks or ()
+                             if str(item.get("format") or "").casefold() == "scanned"
+                             and re.sub(r"\s+", " ", str(item.get("name") or "")).strip().casefold() == source_scanned_name), None)
+    other_decks = [
+        item for item in existing_decks or ()
+        if item is not current_deck
+    ]
+    validation = architect.validate_deck(
+        deck, cards, format_name=format_name, respect_ownership=False
+    )
+    available_cards = annotate_card_availability(cards, other_decks)
+    inventory = {
+        re.sub(r"\s+", " ", str(card.get("name") or "")).strip().casefold(): card
+        for card in available_cards
+    }
+    needed = {}
+    for section in ("main", "sideboard", "commanders"):
+        for card_name, raw_count in (deck.get(section) or {}).items():
+            key = re.sub(r"\s+", " ", str(card_name)).strip().casefold()
+            needed[key] = needed.get(key, 0) + max(0, int(raw_count))
+
+    allocation_report = []
+    errors = list(validation.get("errors", []))
+    for key, count in needed.items():
+        card = inventory.get(key)
+        if not card or architect.is_basic(card):
+            continue
+        availability = card.get("availability", {})
+        owned = int(availability.get("totalOwned", card.get("quantity", 0)) or 0)
+        locations = [
+            {"deck": str(item.get("name") or "Unnamed deck"),
+             "copies": int(item.get("quantity", 0) or 0)}
+            for item in availability.get("reservedByDeck", [])
+            if int(item.get("quantity", 0) or 0) > 0
+        ]
+        reserved_elsewhere = sum(item["copies"] for item in locations)
+        available = max(0, owned - reserved_elsewhere)
+        shortage = max(0, count - available)
+        current_deck_copies = 0
+        if current_deck:
+            for section in ("main", "sideboard", "commanders"):
+                current_deck_copies += sum(
+                    max(0, int(raw_count)) for current_name, raw_count
+                    in (current_deck.get(section) or {}).items()
+                    if re.sub(r"\s+", " ", str(current_name)).strip().casefold() == key
+                )
+        if locations or shortage:
+            row = {
+                "card_name": card.get("name") or next(
+                    (name for section in ("main", "sideboard", "commanders")
+                     for name in (deck.get(section) or {})
+                     if re.sub(r"\s+", " ", str(name)).strip().casefold() == key), key
+                ),
+                "needed": count,
+                "owned": owned,
+                "reserved_elsewhere": reserved_elsewhere,
+                "available": available,
+                "shortage": shortage,
+                "locations": locations,
+            }
+            if current_deck_copies:
+                row["current_deck_name"] = str(current_deck.get("name") or deck.get("name") or "This deck")
+                row["current_deck_copies"] = current_deck_copies
+            allocation_report.append(row)
+        if shortage:
+            held = ", ".join("{} ({})".format(item["deck"], item["copies"]) for item in locations)
+            copy_word = "copy" if count == 1 else "copies"
+            message = "{} needs {} {}, but only {} are available after other deck reservations.".format(
+                card.get("name") or key, count, copy_word, available)
+            if held:
+                message += " Reserved in: {}.".format(held)
+            errors.append(message)
+    validation["allocation_report"] = allocation_report
+    validation["errors"] = errors
+    validation["valid"] = not errors
+    return validation
+
+
 def choose_collection(argument=None):
     if argument:
         path = Path(argument).expanduser().resolve()
@@ -448,7 +612,12 @@ def make_handler(payload, architect=None, engine_cards=None, auth_username="", a
                 self.send_json(200, values)
                 return
             if path == "/api/decks":
-                self.send_json(200, self.saved_decks())
+                decks = self.saved_decks()
+                for deck in decks:
+                    deck["compatible_formats"] = deck_compatible_formats(
+                        deck, state.get("engine_cards", []), architect
+                    ) if architect else []
+                self.send_json(200, decks)
                 return
             if path == "/api/chat/status":
                 self.send_json(200, chat.status() if chat else {"available": False, "message": "Codex chat is not configured."})
@@ -498,16 +667,27 @@ def make_handler(payload, architect=None, engine_cards=None, auth_username="", a
             path = urlparse(self.path).path
             if not self.authorized():
                 return
-            if path not in ("/api/decks", "/api/chat", "/api/import", "/api/simulations"):
+            if path not in ("/api/decks", "/api/decks/validate", "/api/chat", "/api/import", "/api/simulations"):
                 self.send_error(404, "Not found")
                 return
             try:
                 length = int(self.headers.get("Content-Length", "0"))
                 limits = {"/api/chat": 200_000, "/api/decks": 2_000_000,
+                          "/api/decks/validate": 2_000_000,
                           "/api/import": 20_000_000, "/api/simulations": 100_000}
                 if length <= 0 or length > limits[path]:
                     raise ValueError("Invalid request size.")
                 submitted = json.loads(self.rfile.read(length).decode("utf-8"))
+                if path == "/api/decks/validate":
+                    if not architect:
+                        self.send_json(503, {"error": "Deck architect is not configured."})
+                        return
+                    deck = deck_from_submission(submitted)
+                    validation = validate_deck_allocations(
+                        deck, state.get("engine_cards", []), self.saved_decks(), architect
+                    )
+                    self.send_json(200, {"validation": validation})
+                    return
                 if path == "/api/simulations":
                     if not simulation_service:
                         self.send_json(503, {"error": "Deck architect is not configured."})
@@ -610,8 +790,8 @@ def make_handler(payload, architect=None, engine_cards=None, auth_username="", a
                             self.send_json(200, {"answer": created["clarification"]})
                             return
                         deck = created["deck"]
-                        validation = architect.validate_deck(
-                            deck, self.current_deck_cards(deck.get("name"), deck.get("format")), deck["format"]
+                        validation = validate_deck_allocations(
+                            deck, state["engine_cards"], self.saved_decks(), architect
                         )
                         if not validation["valid"]:
                             self.send_json(422, {"error": "Generated deck failed validation and cannot be saved.", "validation": validation})
@@ -622,34 +802,21 @@ def make_handler(payload, architect=None, engine_cards=None, auth_username="", a
                     answer = chat.ask(submitted, self.saved_decks(), state["payload"]["cards"], model=model)
                     self.send_json(200, {"answer": answer})
                     return
-                format_name = str(submitted.get("format") or "").lower()
-                if format_name not in ("commander", "pauper", "standard", "legacy"):
-                    raise ValueError("Choose Commander, Pauper, Standard, or Legacy.")
-                name = str(submitted.get("name") or "Untitled Deck").strip()[:100]
-                deck = {
-                    "name": name, "format": format_name,
-                    "main": submitted.get("main") or {},
-                    "sideboard": submitted.get("sideboard") or {},
-                    "commanders": submitted.get("commanders") or {},
-                    "colors": submitted.get("colors") or [],
-                    "archetype": str(submitted.get("archetype") or "Website build")[:100],
-                    "power_target": str(submitted.get("power_target") or "")[:100],
-                }
-                for section in ("main", "sideboard", "commanders"):
-                    if not isinstance(deck[section], dict):
-                        raise ValueError("Deck sections must be card/count objects.")
-                    deck[section] = {str(card): int(count) for card, count in deck[section].items() if int(count) > 0}
-                validation = architect.validate_deck(
-                    deck, self.current_deck_cards(deck["name"], deck["format"])
+                deck = deck_from_submission(submitted)
+                validation = validate_deck_allocations(
+                    deck, state.get("engine_cards", []), self.saved_decks(), architect
                 )
                 deck["validation"] = validation
-                submitted_report = submitted.get("report")
-                deck["report"] = (submitted_report if isinstance(submitted_report, dict)
-                                   else architect.deck_report(deck, state["engine_cards"]))
                 if not validation["valid"]:
                     self.send_json(400, {"error": "Deck is not valid.", "validation": validation})
                     return
+                submitted_report = submitted.get("report")
+                deck["report"] = (submitted_report if isinstance(submitted_report, dict)
+                                   else architect.deck_report(deck, state["engine_cards"]))
+                source_scanned_name = deck.pop("source_scanned_name", "")
                 files = architect.save_bundle(deck, state["engine_cards"], ROOT / "outputs")
+                if source_scanned_name:
+                    import_store.remove_scanned_deck(source_scanned_name)
                 self.send_json(201, {"deck": deck, "files": files})
             except (ValueError, TypeError, UnicodeDecodeError, json.JSONDecodeError) as error:
                 self.send_json(400, {"error": str(error)})

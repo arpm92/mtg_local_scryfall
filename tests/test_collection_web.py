@@ -51,6 +51,259 @@ class CollectionWebTests(unittest.TestCase):
         self.assertIn('<option value="legacy">Legacy</option>', index)
         self.assertIn("'legacy'", app_script)
 
+    def test_saved_deck_compatibility_uses_each_format_validator(self):
+        deck = {
+            "name": "Green counters",
+            "format": "legacy",
+            "main": {"Owned Common Creature": 4, "Forest": 56},
+            "sideboard": {},
+            "commanders": {},
+        }
+        cards = [
+            {"name": "Owned Common Creature", "quantity": 4, "type_line": "Creature",
+             "oracle_text": "", "legalities": {"commander": "not_legal", "pauper": "legal",
+             "standard": "not_legal", "legacy": "legal"}},
+            {"name": "Forest", "quantity": 60, "type_line": "Basic Land — Forest",
+             "oracle_text": "", "legalities": {"commander": "legal", "pauper": "legal",
+             "standard": "legal", "legacy": "legal"}},
+        ]
+
+        compatible = web.deck_compatible_formats(deck, cards, web.load_architect())
+
+        self.assertEqual(compatible, ["pauper", "legacy"])
+
+    def test_commander_deck_is_not_misclassified_as_a_60_card_format(self):
+        deck = {
+            "name": "Commander fixture",
+            "format": "commander",
+            "main": {"Forest": 99},
+            "sideboard": {},
+            "commanders": {"Owned Commander": 1},
+        }
+        cards = [
+            {"name": "Forest", "quantity": 99, "type_line": "Basic Land — Forest",
+             "oracle_text": "", "color_identity": [], "legalities": {"commander": "legal", "pauper": "legal",
+             "standard": "legal", "legacy": "legal"}},
+            {"name": "Owned Commander", "quantity": 1, "type_line": "Legendary Creature — Human",
+             "oracle_text": "", "color_identity": [], "legalities": {"commander": "legal", "pauper": "not_legal",
+             "standard": "not_legal", "legacy": "legal"}},
+        ]
+
+        compatible = web.deck_compatible_formats(deck, cards, web.load_architect())
+
+        self.assertEqual(compatible, ["commander"])
+
+    def test_decks_view_has_create_button_and_format_subsections(self):
+        index = (Path(web.ROOT) / "web" / "index.html").read_text(encoding="utf-8")
+        app_script = (Path(web.ROOT) / "web" / "app.js").read_text(encoding="utf-8")
+        stylesheet = (Path(web.ROOT) / "web" / "styles.css").read_text(encoding="utf-8")
+
+        self.assertIn('id="create-deck"', index)
+        self.assertIn("compatible_formats", app_script)
+        self.assertIn("saved-deck-format-section", app_script)
+        self.assertIn("$('#create-deck').addEventListener('click', createNewDeck)", app_script)
+        self.assertIn("#deck-editor { scroll-margin-top:", stylesheet)
+        self.assertIn('id="validate-deck"', index)
+        self.assertIn('id="save-deck"', index)
+        self.assertIn('id="deck-validation"', index)
+        self.assertIn("allocation_report", app_script)
+
+    def test_validation_results_render_as_card_note_location_table(self):
+        app_script = (Path(web.ROOT) / "web" / "app.js").read_text(encoding="utf-8")
+        stylesheet = (Path(web.ROOT) / "web" / "styles.css").read_text(encoding="utf-8")
+
+        self.assertIn('<th scope="col">Card</th>', app_script)
+        self.assertIn('<th scope="col">Note</th>', app_script)
+        self.assertIn('<th scope="col">Where found</th>', app_script)
+        self.assertNotIn("deck-validation-errors", app_script)
+        self.assertIn(".validation-results-table", stylesheet)
+        self.assertIn(".validation-location", stylesheet)
+        self.assertIn("$('#save-deck').disabled = !state.validatedDeckFingerprint", app_script)
+
+    def test_scanned_decks_can_select_a_format_and_commander_from_the_scan(self):
+        index = (Path(web.ROOT) / "web" / "index.html").read_text(encoding="utf-8")
+        app_script = (Path(web.ROOT) / "web" / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn('<select id="deck-format">', index)
+        self.assertIn('id="scanned-commander"', index)
+        self.assertIn("function chooseScannedCommander(name)", app_script)
+        self.assertIn("source_scanned_name: state.deckInfo.name", app_script)
+        self.assertIn("function onDeckFormatChange()", app_script)
+
+    def test_scanned_deck_format_analysis_uses_owned_card_legality(self):
+        architect = web.load_architect()
+        cards = [{"name": "Forest", "quantity": 60, "type_line": "Basic Land — Forest",
+                  "oracle_text": "", "legalities": {"pauper": "legal", "legacy": "legal"}}]
+        deck = {"name": "Forest scan", "format": "scanned", "main": {"Forest": 60},
+                "sideboard": {}, "commanders": {}}
+
+        compatible = web.deck_compatible_formats(deck, cards, architect)
+
+        self.assertIn("pauper", compatible)
+        self.assertIn("legacy", compatible)
+        self.assertEqual(deck["format_analysis"]["commander_candidates"], [])
+
+    def test_scanned_commander_analysis_suggests_only_a_valid_in_scan_commander(self):
+        architect = web.load_architect()
+        cards = [
+            {"name": "Forest", "quantity": 99, "type_line": "Basic Land — Forest",
+             "oracle_text": "", "color_identity": [], "legalities": {"commander": "legal"}},
+            {"name": "Sylvan Leader", "quantity": 1, "type_line": "Legendary Creature — Elf",
+             "oracle_text": "", "color_identity": ["G"], "legalities": {"commander": "legal"}},
+        ]
+        deck = {"name": "Forest Commander scan", "format": "scanned",
+                "main": {"Forest": 99, "Sylvan Leader": 1}, "sideboard": {}, "commanders": {}}
+
+        compatible = web.deck_compatible_formats(deck, cards, architect)
+
+        self.assertIn("commander", compatible)
+        self.assertEqual(deck["format_analysis"]["commander_candidates"], ["Sylvan Leader"])
+
+    def test_scanned_reservation_is_not_double_counted_during_validation(self):
+        architect = web.load_architect()
+        cards = [{"name": "Forest", "quantity": 60, "type_line": "Basic Land — Forest",
+                  "oracle_text": "", "legalities": {"pauper": "legal"}}]
+        scanned = {"name": "Forest scan", "format": "scanned", "main": {"Forest": 60},
+                   "sideboard": {}, "commanders": {}}
+        deck = {"name": "Forest scan", "format": "pauper", "source_scanned_name": "Forest scan",
+                "main": {"Forest": 60}, "sideboard": {}, "commanders": {}}
+
+        result = web.validate_deck_allocations(deck, cards, [scanned], architect)
+
+        self.assertTrue(result["valid"], result["errors"])
+
+    def test_validation_reports_shared_cards_and_reserved_deck_locations(self):
+        architect = web.load_architect()
+        cards = [
+            {"name": "Owned Common Creature", "quantity": 2, "type_line": "Creature",
+             "oracle_text": "", "legalities": {"pauper": "legal", "legacy": "legal"}},
+            {"name": "Forest", "quantity": 60, "type_line": "Basic Land — Forest",
+             "oracle_text": "", "legalities": {"pauper": "legal", "legacy": "legal"}},
+        ]
+        deck = {"name": "Green counters", "format": "pauper",
+                "main": {"Owned Common Creature": 2, "Forest": 58},
+                "sideboard": {}, "commanders": {}}
+        other = {"name": "Shang-Chi counters", "format": "legacy",
+                 "main": {"Owned Common Creature": 1, "Forest": 59},
+                 "sideboard": {}, "commanders": {}}
+
+        result = web.validate_deck_allocations(deck, cards, [other], architect)
+
+        self.assertFalse(result["valid"])
+        self.assertEqual(result["allocation_report"], [{
+            "card_name": "Owned Common Creature", "needed": 2, "owned": 2,
+            "reserved_elsewhere": 1, "available": 1, "shortage": 1,
+            "locations": [{"deck": "Shang-Chi counters", "copies": 1}],
+        }])
+
+    def test_validation_shows_current_deck_location_without_double_reserving_it(self):
+        architect = web.load_architect()
+        cards = [
+            {"name": "Owned Common Creature", "quantity": 3, "type_line": "Creature",
+             "oracle_text": "", "legalities": {"pauper": "legal"}},
+            {"name": "Forest", "quantity": 60, "type_line": "Basic Land — Forest",
+             "oracle_text": "", "legalities": {"pauper": "legal"}},
+        ]
+        deck = {"name": "Green counters", "format": "pauper",
+                "main": {"Owned Common Creature": 2, "Forest": 58},
+                "sideboard": {}, "commanders": {}}
+        other = {"name": "Second deck", "format": "legacy",
+                 "main": {"Owned Common Creature": 1, "Forest": 59},
+                 "sideboard": {}, "commanders": {}}
+
+        result = web.validate_deck_allocations(deck, cards, [deck, other], architect)
+
+        self.assertTrue(result["valid"])
+        row = next(item for item in result["allocation_report"]
+                   if item["card_name"] == "Owned Common Creature")
+        self.assertEqual(row["available"], 2)
+        self.assertEqual(row["current_deck_copies"], 2)
+        self.assertEqual(row["current_deck_name"], "Green counters")
+        self.assertEqual(row["locations"], [{"deck": "Second deck", "copies": 1}])
+
+    def test_validate_deck_endpoint_is_read_only_and_returns_allocation_locations(self):
+        architect = web.load_architect()
+        cards = [
+            {"name": "Owned Common Creature", "quantity": 2, "type_line": "Creature",
+             "oracle_text": "", "legalities": {"pauper": "legal", "legacy": "legal"}},
+            {"name": "Forest", "quantity": 60, "type_line": "Basic Land — Forest",
+             "oracle_text": "", "legalities": {"pauper": "legal", "legacy": "legal"}},
+        ]
+        decks_dir = self.root / "outputs" / "legacy"
+        decks_dir.mkdir(parents=True)
+        (decks_dir / "other.json").write_text(json.dumps({
+            "name": "Shang-Chi counters", "format": "legacy",
+            "main": {"Owned Common Creature": 1, "Forest": 59},
+            "sideboard": {}, "commanders": {},
+        }), encoding="utf-8")
+        with patch.object(web, "ROOT", self.root):
+            server = ThreadingHTTPServer(("127.0.0.1", 0), web.make_handler(
+                {"cards": []}, architect=architect, engine_cards=cards
+            ))
+            thread = Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                body = json.dumps({
+                    "name": "Green counters", "format": "pauper",
+                    "main": {"Owned Common Creature": 2, "Forest": 58},
+                    "sideboard": {}, "commanders": {},
+                }).encode("utf-8")
+                request = Request("http://127.0.0.1:{}/api/decks/validate".format(server.server_port),
+                                  data=body, headers={"Content-Type": "application/json"})
+                with urlopen(request) as response:
+                    result = json.loads(response.read())
+                    self.assertEqual(response.status, 200)
+                self.assertFalse(result["validation"]["valid"])
+                self.assertEqual(result["validation"]["allocation_report"][0]["locations"][0]["deck"],
+                                 "Shang-Chi counters")
+                self.assertEqual(len(list(decks_dir.glob("*.json"))), 1)
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=2)
+
+    def test_save_revalidates_allocations_and_does_not_write_on_shortage(self):
+        architect = web.load_architect()
+        cards = [
+            {"name": "Owned Common Creature", "quantity": 2, "type_line": "Creature",
+             "oracle_text": "", "legalities": {"pauper": "legal"}},
+            {"name": "Forest", "quantity": 60, "type_line": "Basic Land — Forest",
+             "oracle_text": "", "legalities": {"pauper": "legal"}},
+        ]
+        decks_dir = self.root / "outputs" / "legacy"
+        decks_dir.mkdir(parents=True)
+        (decks_dir / "other.json").write_text(json.dumps({
+            "name": "Shang-Chi counters", "format": "legacy",
+            "main": {"Owned Common Creature": 1, "Forest": 59},
+            "sideboard": {}, "commanders": {},
+        }), encoding="utf-8")
+        with patch.object(web, "ROOT", self.root):
+            server = ThreadingHTTPServer(("127.0.0.1", 0), web.make_handler(
+                {"cards": []}, architect=architect, engine_cards=cards
+            ))
+            thread = Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                body = json.dumps({
+                    "name": "Green counters", "format": "pauper",
+                    "main": {"Owned Common Creature": 2, "Forest": 58},
+                    "sideboard": {}, "commanders": {},
+                }).encode("utf-8")
+                request = Request("http://127.0.0.1:{}/api/decks".format(server.server_port),
+                                  data=body, headers={"Content-Type": "application/json"})
+                with self.assertRaises(HTTPError) as caught:
+                    urlopen(request)
+                result = json.loads(caught.exception.read())
+                self.assertEqual(caught.exception.code, 400)
+                self.assertEqual(result["validation"]["allocation_report"][0]["locations"], [
+                    {"deck": "Shang-Chi counters", "copies": 1}
+                ])
+                self.assertFalse((self.root / "outputs" / "pauper").exists())
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=2)
+
     def test_load_collection_and_cached_images(self):
         csv_path = self.root / "collection.csv"
         fields = ["Name", "Quantity", "Set code", "Set name", "Scryfall Oracle ID",
@@ -130,7 +383,7 @@ class CollectionWebTests(unittest.TestCase):
 
         self.assertIn("@media (max-width: 1000px)", stylesheet)
         self.assertIn(".deck-library { display: block;", stylesheet)
-        self.assertIn("#saved-decks { display: flex;", stylesheet)
+        self.assertIn("#saved-decks { display: grid;", stylesheet)
         self.assertIn(".chat-messages { min-height: 34dvh;", stylesheet)
         self.assertIn(".chat-form { grid-template-columns: minmax(0, 1fr) auto;", stylesheet)
 

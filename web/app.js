@@ -1,4 +1,4 @@
-const state = { all: [], filtered: [], visible: 60, formats: {}, savedDecks: [], chatMessages: [], chatAvailable: false, chatModelsLoaded: false, deckView: 'grid', deckInfo: null, reservationDeck: null, deck: {main: {}, sideboard: {}, commanders: {}} };
+const state = { all: [], filtered: [], visible: 60, formats: {}, savedDecks: [], chatMessages: [], chatAvailable: false, chatModelsLoaded: false, deckView: 'grid', deckInfo: null, reservationDeck: null, validatedDeckFingerprint: null, deckValidation: null, deck: {main: {}, sideboard: {}, commanders: {}} };
 const DEFAULT_CHAT_MODEL = 'gpt-5.6-luna';
 const $ = (selector) => document.querySelector(selector);
 const grid = $('#card-grid');
@@ -238,11 +238,12 @@ reloadCollection().catch(error => { $('#loading').textContent = `Could not load 
 
 function deckTotal(section) { return Object.values(state.deck[section]).reduce((sum, count) => sum + count, 0); }
 function ownedInDeck(name) { return ['main', 'sideboard', 'commanders'].reduce((sum, section) => sum + (state.deck[section][name] || 0), 0); }
+function isScannedSource() { return state.deckInfo?.format === 'scanned'; }
 function legalForFormat(card, format) { return card.legalities?.[format] === 'legal' || /^Basic Land/.test(card.typeLine); }
 function availableToCurrentDeck(card) {
   const owned = Number(card.availability?.totalOwned ?? card.quantity) || 0;
   let reserved = Number(card.availability?.reserved || 0);
-  if (state.reservationDeck && state.reservationDeck.format === $('#deck-format').value) {
+  if (state.reservationDeck) {
     const own = (card.availability?.reservedByDeck || []).find(item => item.name === state.reservationDeck.name);
     reserved -= Number(own?.quantity || 0);
   }
@@ -254,11 +255,13 @@ function addToDeck(name, section) {
   if (!card || !legalForFormat(card, format)) return;
   if (section === 'commanders' && (!card.commanderCandidate || format !== 'commander')) return;
   if (ownedInDeck(name) >= maxCopies(card, format)) return;
+  clearDeckValidation();
   state.deckInfo = null;
   state.deck[section][name] = (state.deck[section][name] || 0) + 1; renderDeckBuilder();
 }
 function removeFromDeck(name, section) {
   if (!state.deck[section][name]) return;
+  clearDeckValidation();
   state.deckInfo = null;
   state.deck[section][name] -= 1; if (!state.deck[section][name]) delete state.deck[section][name]; renderDeckBuilder();
 }
@@ -331,16 +334,48 @@ function renderDeckPrimer() {
     ${engineDetails.length ? `<div class="primer-engine"><strong>${escapeHtml(report.engine_heading || 'Synergy engine')}</strong><ul>${engineDetails.map(detail => `<li>${escapeHtml(detail)}</li>`).join('')}</ul></div>` : ''}
     <p><strong>Winning conditions</strong></p><div class="primer-wins">${wins.length ? wins.map(name => `<span>${escapeHtml(name)}</span>`).join('') : '<span>No distinct finishers detected</span>'}</div>`;
 }
+function renderDeckFormatAnalysis() {
+  const section = $('#deck-format-analysis');
+  const entries = ['main', 'sideboard', 'commanders'].flatMap(key => Object.entries(state.deck[key] || {}));
+  if (!state.deckInfo || !entries.length) { section.hidden = true; section.innerHTML = ''; return; }
+  const labels = [['alchemy','Alchemy'],['pioneer','Pioneer'],['historic','Historic'],['modern','Modern'],['brawl','Brawl'],['legacy','Legacy'],['vintage','Vintage'],['timeless','Timeless'],['commander','Commander'],['pauper','Pauper'],['oathbreaker','Oathbreaker'],['penny','Penny']];
+  const result = labels.map(([key,label]) => {
+    let legal = 0, notLegal = 0, unknown = 0;
+    for (const [name,count] of entries) {
+      const card = state.all.find(item => item.name === name);
+      const status = card?.legalities?.[key];
+      if (status === 'legal' || status === 'restricted') legal += count;
+      else if (status === 'not_legal' || status === 'banned') notLegal += count;
+      else unknown += count;
+    }
+    const status = notLegal ? `${notLegal} not legal` : unknown ? `${unknown} unknown` : 'All cards legal';
+    return `<div class="format-analysis-row"><b>${label}</b><span>${legal}/${entries.reduce((sum, [,count]) => sum + count, 0)} legal · ${escapeHtml(status)}</span></div>`;
+  }).join('');
+  const compatible = state.deckInfo.compatible_formats || [];
+  const commanderCandidates = state.deckInfo.format_analysis?.commander_candidates || [];
+  const wholeDeck = compatible.length
+    ? `<p class="format-analysis-note">Full deck rules and legality pass: ${compatible.map(name => name[0].toUpperCase() + name.slice(1)).join(', ')}.</p>`
+    : '<p class="format-analysis-note">Full deck validation is available for Commander, Pauper, Standard, and Legacy. Select a format and choose a commander (if needed), then use Validate deck.</p>';
+  const commanderNote = commanderCandidates.length ? `<p class="format-analysis-note">Commander scan candidates that pass full deck validation: ${commanderCandidates.map(escapeHtml).join(', ')}.</p>` : '';
+  section.innerHTML = `<h2>Card legality by format</h2><p>Per-card Scryfall legality for the cards in this deck; deck-size and other rules are checked separately.</p><div class="format-analysis-grid">${result}</div>${wholeDeck}${commanderNote}`;
+  section.hidden = false;
+}
 function renderDeckBuilder() {
-  const format = $('#deck-format').value; const scanned = format === 'scanned';
+  const format = $('#deck-format').value; const scanned = isScannedSource();
   const config = state.formats[format] || {main_size: 0, sideboard_target: 0, commander_min: 0};
-  $('#deck-name').readOnly = scanned; $('#deck-format').disabled = scanned; $('#save-deck').disabled = scanned;
-  $('#simulate-deck').disabled = !state.deckInfo || scanned || !state.simulationAvailable;
-  $('#test-hand').disabled = !state.deckInfo || scanned;
+  $('#deck-name').readOnly = false; $('#deck-format').disabled = false;
+  $('#save-deck').disabled = !state.validatedDeckFingerprint
+    || state.validatedDeckFingerprint !== deckFingerprint(deckPayload());
+  $('#simulate-deck').disabled = !state.deckInfo || scanned || format === 'scanned' || !state.simulationAvailable;
+  $('#test-hand').disabled = !state.deckInfo || scanned || format === 'scanned';
   updateBattleButton();
   document.querySelector('.available-cards').hidden = scanned;
-  $('#commander-section').hidden = format !== 'commander'; $('#sideboard-section').hidden = format === 'commander' || scanned;
-  if (scanned) $('#deck-status').textContent = 'Scanned deck · unclassified · card copies reserved in your collection.';
+  $('#commander-section').hidden = format !== 'commander'; $('#sideboard-section').hidden = format === 'commander' || format === 'scanned';
+  $('#scanned-commander-picker-wrap').hidden = !(scanned && format === 'commander');
+  if (scanned) {
+    if (!state.validatedDeckFingerprint) $('#deck-status').textContent = `Scanned deck · choose a format to validate. Its ${deckTotal('main') + deckTotal('commanders')} card copies remain reserved.`;
+    renderScannedCommanderPicker();
+  }
   $('#commander-total').textContent = `${deckTotal('commanders')} / ${config.commander_min || 0}`;
   $('#main-total').textContent = config.main_min_size
     ? `${deckTotal('main')} / ${config.main_min_size}+ minimum`
@@ -353,6 +388,7 @@ function renderDeckBuilder() {
   const spellCount = spells.reduce((sum,item) => sum + item.count, 0);
   const averageMv = spellCount ? spells.reduce((sum,item) => sum + item.card.manaValue * item.count, 0) / spellCount : 0;
   $('#deck-summary').innerHTML = `<span><strong>${deckTotal('main') + deckTotal('commanders')}</strong> deck cards</span><span><strong>${Object.keys(state.deck.main).length}</strong> unique main</span><span><strong>${creatures}</strong> creatures</span><span><strong>${lands}</strong> lands</span><span><strong>${averageMv.toFixed(2)}</strong> avg. mana value</span>`;
+  renderDeckFormatAnalysis();
   renderDeckPrimer();
   const query = normalize($('#deck-search').value);
   const available = scanned ? [] : state.all.filter(card => legalForFormat(card, format) && (!query || card._search.includes(query))).slice(0, 150);
@@ -368,11 +404,122 @@ function renderDeckBuilder() {
   });
   renderTokens();
 }
-function newDeck() { closeHandTester(); state.deckInfo = null; state.reservationDeck = null; if ($('#deck-format').value === 'scanned') $('#deck-format').value = 'commander'; state.deck = {main: {}, sideboard: {}, commanders: {}}; $('#deck-name').value = 'New Deck'; $('#deck-status').textContent = ''; renderDeckBuilder(); }
-function loadSavedDeck(deck) { closeHandTester(); state.deckInfo = deck; state.reservationDeck = deck.format === 'scanned' ? null : {name: deck.name, format: deck.format}; state.deck = {main: {...deck.main}, sideboard: {...(deck.sideboard || {})}, commanders: {...(deck.commanders || {})}}; $('#deck-name').value = deck.name; $('#deck-format').value = deck.format; $('#chat-deck').value = deck.name; renderDeckBuilder(); }
+function clearDeckValidation() {
+  state.validatedDeckFingerprint = null;
+  state.deckValidation = null;
+  $('#save-deck').disabled = true;
+  $('#deck-validation').hidden = true;
+  $('#deck-validation').innerHTML = '';
+}
+function deckPayload() {
+  return {...state.deck, name: $('#deck-name').value.trim() || 'Untitled Deck', format: $('#deck-format').value,
+    ...(isScannedSource() ? {source_scanned_name: state.deckInfo.name} : {})};
+}
+function deckFingerprint(payload) {
+  const sortedSection = section => Object.fromEntries(Object.entries(payload[section] || {}).sort(([a], [b]) => a.localeCompare(b)));
+  return JSON.stringify({name: payload.name, format: payload.format, source_scanned_name: payload.source_scanned_name || '', main: sortedSection('main'),
+    sideboard: sortedSection('sideboard'), commanders: sortedSection('commanders')});
+}
+function renderDeckValidation(validation) {
+  const report = validation.allocation_report || [];
+  const errors = validation.errors || [];
+  const rows = new Map();
+  const cardKey = value => String(value).toLocaleLowerCase().replace(/\s+/g, ' ').trim();
+  const locationMarkup = (item) => {
+    const locations = [...(item.locations || [])];
+    if (item.current_deck_copies) locations.unshift({deck: `${item.current_deck_name} · this deck`, copies: item.current_deck_copies});
+    return locations.length
+      ? locations.map(location => `<span class="validation-location">${escapeHtml(location.deck)} <b>×${location.copies}</b></span>`).join('')
+      : '<span class="validation-empty">No deck location recorded</span>';
+  };
+  for (const item of report) {
+    const reserved = Number(item.reserved_elsewhere || 0);
+    const note = item.shortage
+      ? `${item.needed} needed · ${item.owned} owned · ${item.available} available · ${item.shortage} short`
+      : `${item.needed} needed · ${item.owned} owned · ${item.available} available · ${reserved} reserved elsewhere`;
+    rows.set(cardKey(item.card_name), {cardName: item.card_name, notes: [note], locations: locationMarkup(item), hasError: Boolean(item.shortage)});
+  }
+  for (const error of errors) {
+    const allocation = report.find(item => error.startsWith(`${item.card_name} needs `));
+    if (allocation) continue;
+    const unknown = error.match(/^Unknown card: (.+)\.$/);
+    const illegal = error.match(/^(.+?) is not currently (.+)-legal\.$/);
+    const copyLimit = error.match(/^(.+?) has (\d+) copies across deck sections; limit is (\d+)\.$/);
+    const cardName = unknown?.[1] || illegal?.[1] || copyLimit?.[1] || 'Deck rules';
+    const where = unknown ? 'Not found in the owned collection'
+      : illegal ? 'Owned collection · format legality'
+      : copyLimit ? 'This deck · copy limit'
+      : 'Deck structure · format rules';
+    const key = cardKey(cardName);
+    const existing = rows.get(key);
+    if (existing) { existing.notes.push(error); existing.hasError = true; }
+    else rows.set(key, {cardName, notes: [error], locations: `<span class="validation-location">${escapeHtml(where)}</span>`, hasError: true});
+  }
+  const rowMarkup = rows.size ? [...rows.values()].map(item =>
+    `<tr class="${item.hasError ? 'validation-row-error' : ''}"><th scope="row">${escapeHtml(item.cardName)}</th><td>${item.notes.map(note => `<span class="validation-note">${escapeHtml(note)}</span>`).join('')}</td><td>${item.locations}</td></tr>`
+  ).join('')
+    : `<tr><td colspan="3" class="validation-no-issues">${validation.valid ? 'No validation issues found.' : 'No card-specific details are available.'}</td></tr>`;
+  const issueCount = errors.length;
+  const summary = validation.valid
+    ? 'Format, card counts, legality, and collection availability pass.'
+    : `${issueCount} issue${issueCount === 1 ? '' : 's'} to fix before saving.`;
+  const table = `<div class="validation-table-wrap"><table class="validation-results-table"><thead><tr><th scope="col">Card</th><th scope="col">Note</th><th scope="col">Where found</th></tr></thead><tbody>${rowMarkup}</tbody></table></div>`;
+  $('#deck-validation').innerHTML = `<div class="validation-heading"><div><p class="eyebrow">Deck check</p><h3>Validation results</h3></div><span class="validation-count ${validation.valid ? 'is-valid' : 'has-errors'}">${validation.valid ? 'Passed' : `${issueCount} issues`}</span></div><p class="deck-validation-summary">${escapeHtml(summary)}</p>${table}`;
+  $('#deck-validation').hidden = false;
+}
+function renderScannedCommanderPicker() {
+  const select = $('#scanned-commander');
+  const current = Object.keys(state.deck.commanders)[0] || '';
+  const choices = Object.keys(state.deck.main).filter(name => state.all.some(card => card.name === name && card.commanderCandidate));
+  select.innerHTML = '<option value="">Choose a commander</option>' + choices.map(name => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('');
+  select.value = choices.includes(current) ? current : '';
+}
+function chooseScannedCommander(name) {
+  const previous = Object.keys(state.deck.commanders)[0];
+  if (previous) {
+    state.deck.main[previous] = (state.deck.main[previous] || 0) + state.deck.commanders[previous];
+    delete state.deck.commanders[previous];
+  }
+  if (name && state.deck.main[name] > 0) {
+    state.deck.main[name] -= 1;
+    if (!state.deck.main[name]) delete state.deck.main[name];
+    state.deck.commanders[name] = 1;
+  }
+  clearDeckValidation();
+  renderDeckBuilder();
+}
+function onDeckFormatChange() {
+  if (!isScannedSource()) { newDeck(); return; }
+  if ($('#deck-format').value !== 'commander' && Object.keys(state.deck.commanders).length) {
+    for (const [name, count] of Object.entries(state.deck.commanders)) state.deck.main[name] = (state.deck.main[name] || 0) + count;
+    state.deck.commanders = {};
+  }
+  clearDeckValidation();
+  renderDeckBuilder();
+}
+function newDeck() { closeHandTester(); clearDeckValidation(); state.deckInfo = null; state.reservationDeck = null; if ($('#deck-format').value === 'scanned') $('#deck-format').value = 'commander'; state.deck = {main: {}, sideboard: {}, commanders: {}}; $('#deck-name').value = 'New Deck'; $('#deck-status').textContent = ''; renderDeckBuilder(); }
+function createNewDeck() {
+  newDeck();
+  $('#deck-status').textContent = 'Choose a format, add cards, then validate and save your deck.';
+  $('#deck-editor').scrollIntoView({behavior: 'smooth', block: 'start'});
+  $('#deck-name').focus();
+}
+function loadSavedDeck(deck) { closeHandTester(); clearDeckValidation(); state.deckInfo = deck; state.reservationDeck = {name: deck.name, format: deck.format}; state.deck = {main: {...deck.main}, sideboard: {...(deck.sideboard || {})}, commanders: {...(deck.commanders || {})}}; $('#deck-name').value = deck.name; $('#deck-format').value = deck.format; $('#chat-deck').value = deck.name; renderDeckBuilder(); }
 function renderSavedDecks() {
   $('#deck-count').textContent = `${state.savedDecks.length} saved deck${state.savedDecks.length === 1 ? '' : 's'}`;
-  $('#saved-decks').innerHTML = state.savedDecks.map((deck,index) => `<div class="saved-deck-row"><button class="saved-deck" data-saved="${index}">${escapeHtml(deck.name)}<small>${deck.format === 'scanned' ? 'Scanned deck · unclassified' : escapeHtml(deck.format)}</small></button><button class="delete-deck" type="button" data-delete-deck="${index}" aria-label="Delete ${escapeHtml(deck.name)}" title="Delete deck">×</button></div>`).join('') || '<p class="muted">No saved decks yet.</p>';
+  const formats = [['commander', 'Commander'], ['pauper', 'Pauper'], ['standard', 'Standard'], ['legacy', 'Legacy']];
+  const row = (deck, index) => `<div class="saved-deck-row"><button class="saved-deck" data-saved="${index}">${escapeHtml(deck.name)}<small>${deck.format === 'scanned' ? `Scan · fits: ${(deck.compatible_formats || []).map(name => name[0].toUpperCase() + name.slice(1)).join(', ') || 'choose a format to validate'}` : `Saved as ${escapeHtml(deck.format)}`}</small></button><button class="delete-deck" type="button" data-delete-deck="${index}" aria-label="Delete ${escapeHtml(deck.name)}" title="Delete deck">×</button></div>`;
+  const sections = formats.map(([format, label]) => {
+    const matches = state.savedDecks.map((deck, index) => ({deck, index}))
+      .filter(({deck}) => (deck.compatible_formats || [deck.format]).includes(format));
+    return `<details class="saved-deck-format-section" open><summary>${label}<span>${matches.length}</span></summary>${matches.map(({deck, index}) => row(deck, index)).join('') || '<p class="muted">No compatible saved decks.</p>'}</details>`;
+  });
+  const scanned = state.savedDecks.map((deck, index) => ({deck, index})).filter(({deck}) => deck.format === 'scanned' && !(deck.compatible_formats || []).length);
+  if (scanned.length) sections.push(`<details class="saved-deck-format-section"><summary>Scanned / unclassified<span>${scanned.length}</span></summary>${scanned.map(({deck, index}) => row(deck, index)).join('')}</details>`);
+  const unclassified = state.savedDecks.map((deck, index) => ({deck, index}))
+    .filter(({deck}) => deck.format !== 'scanned' && !(deck.compatible_formats || [deck.format]).length);
+  if (unclassified.length) sections.push(`<details class="saved-deck-format-section"><summary>Needs legality review<span>${unclassified.length}</span></summary>${unclassified.map(({deck, index}) => row(deck, index)).join('')}</details>`);
+  $('#saved-decks').innerHTML = sections.join('') || '<p class="muted">No saved decks yet.</p>';
   const picker = $('#chat-deck'); const selected = picker.value;
   picker.innerHTML = '<option value="">Collection / general question</option>' + state.savedDecks.map(deck => `<option value="${escapeHtml(deck.name)}">${escapeHtml(deck.name)} (${escapeHtml(deck.format)})</option>`).join('');
   if (state.savedDecks.some(deck => deck.name === selected)) picker.value = selected;
@@ -395,14 +542,44 @@ async function deleteDeck(index) {
     ? `Removed the reservation for “${deck.name}”. Its cards remain in your collection.`
     : `Deleted “${deck.name}”. Files moved to outputs/.trash.`;
 }
+async function validateDeck() {
+  clearDeckValidation();
+  const status = $('#deck-status'); status.className = 'deck-status'; status.textContent = 'Checking format rules and card reservations...';
+  const payload = deckPayload();
+  const fingerprint = deckFingerprint(payload);
+  try {
+    const response = await fetch('/api/decks/validate', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)});
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Could not validate this deck.');
+    const validation = result.validation || {};
+    state.deckValidation = validation;
+    renderDeckValidation(validation);
+    if (!validation.valid) {
+      status.classList.add('error'); status.textContent = 'Validation found issues. Review the results table below.';
+      return;
+    }
+    state.validatedDeckFingerprint = fingerprint;
+    $('#save-deck').disabled = false;
+    status.classList.add('success'); status.textContent = 'Validation passed. Save the deck when you are ready.';
+  } catch (error) { status.classList.add('error'); status.textContent = error.message; }
+}
 async function saveDeck() {
-  const status = $('#deck-status'); status.className = 'deck-status'; status.textContent = 'Validating...';
-  const payload = {...state.deck, name: $('#deck-name').value.trim() || 'Untitled Deck', format: $('#deck-format').value};
+  const status = $('#deck-status'); status.className = 'deck-status';
+  const payload = deckPayload();
+  if (!state.validatedDeckFingerprint || state.validatedDeckFingerprint !== deckFingerprint(payload)) {
+    status.classList.add('error'); status.textContent = 'Validate the current deck before saving.'; return;
+  }
+  status.textContent = 'Saving deck...';
   try {
     const response = await fetch('/api/decks', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)});
     const result = await response.json();
-    if (!response.ok) throw new Error((result.validation?.errors || [result.error]).join(' '));
+    if (!response.ok) {
+      if (result.validation) { state.deckValidation = result.validation; renderDeckValidation(result.validation); }
+      state.validatedDeckFingerprint = null; $('#save-deck').disabled = true;
+      throw new Error((result.validation?.errors || [result.error]).join(' '));
+    }
     state.deckInfo = result.deck; state.reservationDeck = {name: result.deck.name, format: result.deck.format};
+    clearDeckValidation();
     await reloadCollection(); renderDeckBuilder(); status.classList.add('success'); status.textContent = `Saved and exported to outputs/${payload.format}.`;
     state.savedDecks = await fetch('/api/decks').then(r => r.json()); renderSavedDecks();
   } catch (error) { status.classList.add('error'); status.textContent = error.message; }
@@ -411,7 +588,7 @@ $('#deck-card-list').addEventListener('click', event => { const button = event.t
 $('.deck-list-panel').addEventListener('click', event => { const add = event.target.closest('[data-add]'); const remove = event.target.closest('[data-remove]'); if (add) addToDeck(add.dataset.card, add.dataset.add); if (remove) removeFromDeck(remove.dataset.card, remove.dataset.remove); });
 $('#decks-view').addEventListener('click', event => { const preview = event.target.closest('[data-preview-index]'); if (preview) openCard(Number(preview.dataset.previewIndex)); });
 document.querySelectorAll('[data-deck-view]').forEach(button => button.addEventListener('click', () => { state.deckView = button.dataset.deckView; document.querySelectorAll('[data-deck-view]').forEach(item => { const active = item === button; item.classList.toggle('active', active); item.setAttribute('aria-pressed', String(active)); }); renderDeckBuilder(); }));
-$('#deck-search').addEventListener('input', renderDeckBuilder); $('#deck-format').addEventListener('change', newDeck); $('#new-deck').addEventListener('click', newDeck); $('#save-deck').addEventListener('click', saveDeck);
+$('#deck-search').addEventListener('input', renderDeckBuilder); $('#deck-format').addEventListener('change', onDeckFormatChange); $('#scanned-commander').addEventListener('change', event => chooseScannedCommander(event.target.value)); $('#deck-name').addEventListener('input', clearDeckValidation); $('#new-deck').addEventListener('click', newDeck); $('#create-deck').addEventListener('click', createNewDeck); $('#validate-deck').addEventListener('click', validateDeck); $('#save-deck').addEventListener('click', saveDeck);
 
 const simulationDialog = $('#simulation-dialog');
 const handDialog = $('#hand-dialog');
