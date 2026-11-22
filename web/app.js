@@ -431,7 +431,19 @@ function clearDeckValidation() {
   $('#deck-validation').innerHTML = '';
 }
 function deckPayload() {
+  const metadataFields = ['report', 'forge_evidence', 'optimization_history', 'commander_research',
+    'commander_candidate_comparison', 'final_verdict', 'analysis_status', 'parent'];
+  const sameSection = section => {
+    const normalize = value => Object.entries(value || {}).sort(([left], [right]) => left.localeCompare(right));
+    return JSON.stringify(normalize(state.deckInfo?.[section])) === JSON.stringify(normalize(state.deck?.[section]));
+  };
+  const preserveAnalysis = state.deckInfo?.format === $('#deck-format').value
+    && ['main', 'sideboard', 'commanders'].every(sameSection);
+  const metadata = preserveAnalysis
+    ? Object.fromEntries(metadataFields.filter(field => Object.prototype.hasOwnProperty.call(state.deckInfo, field))
+      .map(field => [field, state.deckInfo[field]])) : {};
   return {...state.deck, name: $('#deck-name').value.trim() || 'Untitled Deck', format: $('#deck-format').value,
+    ...metadata,
     ...(state.deckInfo?.ownership_mode === 'proposal' ? {ownership_mode: 'proposal'} : {}),
     ...(isScannedSource() ? {source_scanned_name: state.deckInfo.name} : {})};
 }

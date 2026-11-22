@@ -240,6 +240,21 @@ class CollectionWebTests(unittest.TestCase):
         self.assertFalse(result["collection_complete"])
         self.assertEqual(result["allocation_report"][0]["shortage"], 3)
 
+    def test_deck_submission_preserves_existing_primer_and_forge_evidence(self):
+        report = {"primary_objective": "Win through a resilient Angel engine."}
+        evidence = {"status": "completed", "completed_games": 10, "wins": 4, "losses": 6}
+        history = [{"iteration": 2, "stage": "tested revision"}]
+
+        deck = web.deck_from_submission({
+            "name": "Abzan Angel Wardens", "format": "legacy",
+            "main": {"Island": 60}, "report": report,
+            "forge_evidence": evidence, "optimization_history": history,
+        })
+
+        self.assertEqual(deck["report"], report)
+        self.assertEqual(deck["forge_evidence"], evidence)
+        self.assertEqual(deck["optimization_history"], history)
+
     def test_saving_a_quantity_proposal_skips_reservation_but_keeps_shortage_details(self):
         architect = web.load_architect()
         cards = [

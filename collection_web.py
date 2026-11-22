@@ -109,6 +109,17 @@ def deck_from_submission(submitted):
         "power_target": str(submitted.get("power_target") or "")[:100],
         "source_scanned_name": str(submitted.get("source_scanned_name") or "").strip()[:100],
     }
+    for field in ("report", "forge_evidence", "commander_research",
+                  "commander_candidate_comparison", "final_verdict", "analysis_status"):
+        value = submitted.get(field)
+        if isinstance(value, dict) or (field == "analysis_status" and isinstance(value, str)):
+            deck[field] = value
+    history = submitted.get("optimization_history")
+    if isinstance(history, list):
+        deck["optimization_history"] = history
+    parent = submitted.get("parent")
+    if isinstance(parent, str) and parent.strip():
+        deck["parent"] = parent.strip()[:100]
     for section in ("main", "sideboard", "commanders"):
         if not isinstance(deck[section], dict):
             raise ValueError("Deck sections must be card/count objects.")
