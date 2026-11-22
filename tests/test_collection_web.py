@@ -255,6 +255,51 @@ class CollectionWebTests(unittest.TestCase):
         self.assertEqual(deck["forge_evidence"], evidence)
         self.assertEqual(deck["optimization_history"], history)
 
+    def test_analysis_update_preserves_decklist_and_allocation_validation(self):
+        architect = web.load_architect()
+        decks_dir = self.root / "outputs" / "legacy"
+        decks_dir.mkdir(parents=True)
+        original = {
+            "name": "Analysis Fixture", "format": "legacy",
+            "main": {"Forest": 60}, "sideboard": {}, "commanders": {},
+            "validation": {"valid": True, "collection_complete": False,
+                           "allocation_report": [{"card_name": "Fixture", "shortage": 1}]},
+            "report": {"primary_objective": "Old strategy."},
+        }
+        deck_path = decks_dir / "analysis-fixture.json"
+        deck_path.write_text(json.dumps(original), encoding="utf-8")
+        report = {"primary_objective": "Updated strategy."}
+        evidence = {"status": "completed", "completed_games": 10, "wins": 4, "losses": 6}
+        with patch.object(web, "ROOT", self.root):
+            server = ThreadingHTTPServer(("127.0.0.1", 0), web.make_handler(
+                {"cards": []}, architect=architect,
+                engine_cards=[{"name": "Forest", "type_line": "Basic Land — Forest",
+                               "quantity": 99, "legalities": {"legacy": "legal"}}],
+            ))
+            thread = Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                body = json.dumps({
+                    "name": original["name"], "format": original["format"],
+                    "report": report, "forge_evidence": evidence,
+                }).encode("utf-8")
+                request = Request(
+                    "http://127.0.0.1:{}/api/decks/analysis".format(server.server_port),
+                    data=body, headers={"Content-Type": "application/json"},
+                )
+                with urlopen(request) as response:
+                    result = json.loads(response.read())
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=2)
+
+        saved = json.loads(deck_path.read_text(encoding="utf-8"))
+        self.assertEqual(result["deck"]["report"], report)
+        self.assertEqual(saved["forge_evidence"], evidence)
+        self.assertEqual(saved["main"], original["main"])
+        self.assertEqual(saved["validation"], original["validation"])
+
     def test_saving_a_quantity_proposal_skips_reservation_but_keeps_shortage_details(self):
         architect = web.load_architect()
         cards = [

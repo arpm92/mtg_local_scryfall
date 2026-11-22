@@ -681,13 +681,15 @@ def make_handler(payload, architect=None, engine_cards=None, auth_username="", a
             path = urlparse(self.path).path
             if not self.authorized():
                 return
-            if path not in ("/api/decks", "/api/decks/validate", "/api/chat", "/api/import", "/api/simulations"):
+            if path not in ("/api/decks", "/api/decks/validate", "/api/decks/analysis",
+                            "/api/chat", "/api/import", "/api/simulations"):
                 self.send_error(404, "Not found")
                 return
             try:
                 length = int(self.headers.get("Content-Length", "0"))
                 limits = {"/api/chat": 200_000, "/api/decks": 2_000_000,
                           "/api/decks/validate": 2_000_000,
+                          "/api/decks/analysis": 2_000_000,
                           "/api/import": 20_000_000, "/api/simulations": 100_000}
                 if length <= 0 or length > limits[path]:
                     raise ValueError("Invalid request size.")
@@ -701,6 +703,36 @@ def make_handler(payload, architect=None, engine_cards=None, auth_username="", a
                         deck, state.get("engine_cards", []), self.saved_decks(), architect
                     )
                     self.send_json(200, {"validation": validation})
+                    return
+                if path == "/api/decks/analysis":
+                    if not architect:
+                        self.send_json(503, {"error": "Deck architect is not configured."})
+                        return
+                    name = str(submitted.get("name") or "").strip()
+                    format_name = str(submitted.get("format") or "").casefold()
+                    deck = next((item for item in self.saved_decks()
+                                 if item.get("name") == name and item.get("format") == format_name
+                                 and format_name in ("commander", "pauper", "standard", "legacy")), None)
+                    if not deck:
+                        self.send_json(404, {"error": "Saved deck not found."})
+                        return
+                    report = submitted.get("report")
+                    if not isinstance(report, dict):
+                        raise ValueError("A deck report object is required.")
+                    deck["report"] = report
+                    for field in ("forge_evidence", "commander_research",
+                                  "commander_candidate_comparison", "final_verdict", "analysis_status"):
+                        value = submitted.get(field)
+                        if isinstance(value, dict) or (field == "analysis_status" and isinstance(value, str)):
+                            deck[field] = value
+                    history = submitted.get("optimization_history")
+                    if isinstance(history, list):
+                        deck["optimization_history"] = history
+                    parent = submitted.get("parent")
+                    if isinstance(parent, str) and parent.strip():
+                        deck["parent"] = parent.strip()[:100]
+                    files = architect.save_bundle(deck, state.get("engine_cards", []), ROOT / "outputs")
+                    self.send_json(200, {"deck": deck, "files": files})
                     return
                 if path == "/api/simulations":
                     if not simulation_service:
