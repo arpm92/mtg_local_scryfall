@@ -274,11 +274,14 @@ function deckVisualCard(name, count, section) {
   const art = card?.imageUrl
     ? `<img src="${escapeHtml(card.imageUrl)}" alt="${escapeHtml(name)}" loading="lazy">`
     : `<span class="deck-art-fallback">${escapeHtml(name)}</span>`;
+  const selectingCommander = isScannedSource() && $('#deck-format').value === 'commander'
+    && section === 'main' && card?.commanderCandidate;
   const preview = card ? `data-preview-index="${card.index}"` : '';
+  const selectCommander = selectingCommander ? `data-select-commander="${escapeHtml(name)}"` : '';
   const actions = state.deckInfo?.format === 'scanned' ? '' : `<span class="deck-card-actions"><button type="button" data-remove="${section}" data-card="${escapeHtml(name)}" aria-label="Remove ${escapeHtml(name)}">−</button><button type="button" data-add="${section}" data-card="${escapeHtml(name)}" aria-label="Add another ${escapeHtml(name)}">+</button></span>`;
   return `<article class="deck-visual-card">
     <span class="deck-qty">${count}×</span>
-    <button class="deck-card-art" type="button" ${preview} aria-label="View ${escapeHtml(name)}">${art}</button>
+    <button class="deck-card-art ${selectingCommander ? 'deck-commander-selectable' : ''}" type="button" ${preview} ${selectCommander} aria-label="${selectingCommander ? `Set ${escapeHtml(name)} as commander` : `View ${escapeHtml(name)}`} ">${art}${selectingCommander ? '<span class="select-commander-overlay">Set as commander</span>' : ''}</button>
     ${actions}
     <span class="deck-visual-name" title="${escapeHtml(name)}">${escapeHtml(name)}</span>
   </article>`;
@@ -328,11 +331,26 @@ function renderDeckPrimer() {
   }
   const wins = report.win_conditions || [];
   const engineDetails = report.engine_details || [];
+  const packageRows = [
+    ['Interaction', report.interaction], ['Protection', report.protection], ['Recovery', report.recovery],
+  ].filter(([, cards]) => Array.isArray(cards) && cards.length);
+  const packageMarkup = packageRows.length ? `<div class="primer-packages">${packageRows.map(([heading, cards]) =>
+    `<div><strong>${heading}</strong><span>${cards.map(escapeHtml).join(' · ')}</span></div>`).join('')}</div>` : '';
+  const weaknesses = report.weaknesses || [];
+  const weaknessMarkup = weaknesses.length
+    ? `<div class="primer-weaknesses"><strong>Known weaknesses</strong><ul>${weaknesses.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul></div>` : '';
+  const estimate = report.connive_opening_estimate;
+  const estimateMarkup = estimate ? `<div class="primer-estimate"><strong>Opening hand estimate</strong><p>${Number(estimate.probability * 100).toFixed(1)}% chance to see at least one of ${Number(estimate.source_copies)} connive sources in ${Number(estimate.opening_hand_size)} cards; ${Number(estimate.early_probability * 100).toFixed(1)}% for ${Number(estimate.early_source_copies)} early sources.</p><small>Raw draw math only; it does not account for mana, sequencing, or mulligans.</small></div>` : '';
+  const curve = report.mana_curve && typeof report.mana_curve === 'object'
+    ? Object.entries(report.mana_curve).map(([mv, count]) => `${mv} mana: ${count}`).join(' · ') : '';
+  const curveMarkup = curve ? `<p class="primer-curve"><strong>Mana curve:</strong> ${escapeHtml(curve)} · ${Number(report.land_count || 0)} lands</p>` : '';
   $('#deck-primer').innerHTML = `<div class="deck-primer-header"><div><span class="primer-label">Deck primer</span><h2>${escapeHtml(state.deckInfo.archetype || 'Deck strategy')}</h2></div><span class="primer-label">${escapeHtml(report.identity || '')}</span></div>
     <p>${escapeHtml(report.primary_objective || '')}</p>
     <div class="primer-path"><div><strong>Early game</strong>${escapeHtml(report.early_game || '')}</div><div><strong>Mid game</strong>${escapeHtml(report.middle_game || '')}</div><div><strong>Late game</strong>${escapeHtml(report.late_game || '')}</div></div>
     ${engineDetails.length ? `<div class="primer-engine"><strong>${escapeHtml(report.engine_heading || 'Synergy engine')}</strong><ul>${engineDetails.map(detail => `<li>${escapeHtml(detail)}</li>`).join('')}</ul></div>` : ''}
-    <p><strong>Winning conditions</strong></p><div class="primer-wins">${wins.length ? wins.map(name => `<span>${escapeHtml(name)}</span>`).join('') : '<span>No distinct finishers detected</span>'}</div>`;
+    <p><strong>Winning conditions</strong></p><div class="primer-wins">${wins.length ? wins.map(name => `<span>${escapeHtml(name)}</span>`).join('') : '<span>No distinct finishers detected</span>'}</div>
+    ${packageMarkup}${estimateMarkup}${curveMarkup}${weaknessMarkup}
+    ${report.sideboard_strategy ? `<p class="primer-sideboard"><strong>Sideboard:</strong> ${escapeHtml(report.sideboard_strategy)}</p>` : ''}`;
 }
 function renderDeckFormatAnalysis() {
   const section = $('#deck-format-analysis');
@@ -372,6 +390,7 @@ function renderDeckBuilder() {
   document.querySelector('.available-cards').hidden = scanned;
   $('#commander-section').hidden = format !== 'commander'; $('#sideboard-section').hidden = format === 'commander' || format === 'scanned';
   $('#scanned-commander-picker-wrap').hidden = !(scanned && format === 'commander');
+  $('#scanned-commander-hint').hidden = !(scanned && format === 'commander');
   if (scanned) {
     if (!state.validatedDeckFingerprint) $('#deck-status').textContent = `Scanned deck · choose a format to validate. Its ${deckTotal('main') + deckTotal('commanders')} card copies remain reserved.`;
     renderScannedCommanderPicker();
@@ -413,6 +432,7 @@ function clearDeckValidation() {
 }
 function deckPayload() {
   return {...state.deck, name: $('#deck-name').value.trim() || 'Untitled Deck', format: $('#deck-format').value,
+    ...(state.deckInfo?.ownership_mode === 'proposal' ? {ownership_mode: 'proposal'} : {}),
     ...(isScannedSource() ? {source_scanned_name: state.deckInfo.name} : {})};
 }
 function deckFingerprint(payload) {
@@ -437,7 +457,8 @@ function renderDeckValidation(validation) {
     const note = item.shortage
       ? `${item.needed} needed · ${item.owned} owned · ${item.available} available · ${item.shortage} short`
       : `${item.needed} needed · ${item.owned} owned · ${item.available} available · ${reserved} reserved elsewhere`;
-    rows.set(cardKey(item.card_name), {cardName: item.card_name, notes: [note], locations: locationMarkup(item), hasError: Boolean(item.shortage)});
+    const proposalGap = validation.ownership_mode === 'proposal' && Boolean(item.shortage);
+    rows.set(cardKey(item.card_name), {cardName: item.card_name, notes: [note], locations: locationMarkup(item), hasError: Boolean(item.shortage) && !proposalGap, hasWarning: proposalGap});
   }
   for (const error of errors) {
     const allocation = report.find(item => error.startsWith(`${item.card_name} needs `));
@@ -456,15 +477,21 @@ function renderDeckValidation(validation) {
     else rows.set(key, {cardName, notes: [error], locations: `<span class="validation-location">${escapeHtml(where)}</span>`, hasError: true});
   }
   const rowMarkup = rows.size ? [...rows.values()].map(item =>
-    `<tr class="${item.hasError ? 'validation-row-error' : ''}"><th scope="row">${escapeHtml(item.cardName)}</th><td>${item.notes.map(note => `<span class="validation-note">${escapeHtml(note)}</span>`).join('')}</td><td>${item.locations}</td></tr>`
+    `<tr class="${item.hasError ? 'validation-row-error' : item.hasWarning ? 'validation-row-warning' : ''}"><th scope="row">${escapeHtml(item.cardName)}</th><td>${item.notes.map(note => `<span class="validation-note">${escapeHtml(note)}</span>`).join('')}</td><td>${item.locations}</td></tr>`
   ).join('')
     : `<tr><td colspan="3" class="validation-no-issues">${validation.valid ? 'No validation issues found.' : 'No card-specific details are available.'}</td></tr>`;
   const issueCount = errors.length;
-  const summary = validation.valid
-    ? 'Format, card counts, legality, and collection availability pass.'
-    : `${issueCount} issue${issueCount === 1 ? '' : 's'} to fix before saving.`;
+  const summary = validation.valid && validation.collection_complete === false
+    ? 'Format, deck size, and legality pass. Quantity gaps remain; this proposal reserves no collection copies.'
+    : validation.valid
+      ? 'Format, card counts, legality, and collection availability pass.'
+      : `${issueCount} issue${issueCount === 1 ? '' : 's'} to fix before saving.`;
   const table = `<div class="validation-table-wrap"><table class="validation-results-table"><thead><tr><th scope="col">Card</th><th scope="col">Note</th><th scope="col">Where found</th></tr></thead><tbody>${rowMarkup}</tbody></table></div>`;
-  $('#deck-validation').innerHTML = `<div class="validation-heading"><div><p class="eyebrow">Deck check</p><h3>Validation results</h3></div><span class="validation-count ${validation.valid ? 'is-valid' : 'has-errors'}">${validation.valid ? 'Passed' : `${issueCount} issues`}</span></div><p class="deck-validation-summary">${escapeHtml(summary)}</p>${table}`;
+  const resultLabel = validation.valid && validation.collection_complete === false ? 'Format passed · quantity gaps'
+    : validation.valid ? 'Passed' : `${issueCount} issues`;
+  const resultClass = !validation.valid ? 'has-errors'
+    : validation.collection_complete === false ? 'has-warnings' : 'is-valid';
+  $('#deck-validation').innerHTML = `<div class="validation-heading"><div><p class="eyebrow">Deck check</p><h3>Validation results</h3></div><span class="validation-count ${resultClass}">${resultLabel}</span></div><p class="deck-validation-summary">${escapeHtml(summary)}</p>${table}`;
   $('#deck-validation').hidden = false;
 }
 function renderScannedCommanderPicker() {
@@ -504,11 +531,49 @@ function createNewDeck() {
   $('#deck-editor').scrollIntoView({behavior: 'smooth', block: 'start'});
   $('#deck-name').focus();
 }
-function loadSavedDeck(deck) { closeHandTester(); clearDeckValidation(); state.deckInfo = deck; state.reservationDeck = {name: deck.name, format: deck.format}; state.deck = {main: {...deck.main}, sideboard: {...(deck.sideboard || {})}, commanders: {...(deck.commanders || {})}}; $('#deck-name').value = deck.name; $('#deck-format').value = deck.format; $('#chat-deck').value = deck.name; renderDeckBuilder(); }
+function loadSavedDeck(deck) { closeHandTester(); clearDeckValidation(); state.deckInfo = deck; state.reservationDeck = {name: deck.name, format: deck.format}; state.deck = {main: {...deck.main}, sideboard: {...(deck.sideboard || {})}, commanders: {...(deck.commanders || {})}}; $('#deck-name').value = deck.name; $('#deck-format').value = deck.format; $('#chat-deck').value = deck.name; renderDeckBuilder(); if (deck.format !== 'scanned') checkSavedDeck(deck); }
+async function checkSavedDeck(deck) {
+  const status = $('#deck-status');
+  status.className = 'deck-status';
+  status.textContent = 'Checking current format rules and card availability...';
+  try {
+    const response = await fetch('/api/decks/validate', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name: deck.name, format: deck.format, ownership_mode: deck.ownership_mode,
+        main: deck.main,
+        sideboard: deck.sideboard || {}, commanders: deck.commanders || {}}),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Could not check this saved deck.');
+    if (state.deckInfo?.name !== deck.name || state.deckInfo?.format !== deck.format) return;
+    state.deckValidation = result.validation || {};
+    renderDeckValidation(state.deckValidation);
+    status.classList.add(state.deckValidation.valid && state.deckValidation.collection_complete !== false ? 'success' : 'error');
+    status.textContent = state.deckValidation.valid && state.deckValidation.collection_complete === false
+      ? 'Format is valid, but collection quantities are short. This proposal does not reserve your copies.'
+      : state.deckValidation.valid
+        ? 'Saved deck check passed: format rules and current card availability are valid.'
+      : 'Saved deck check found issues. Review the results table below.';
+  } catch (error) {
+    if (state.deckInfo?.name !== deck.name || state.deckInfo?.format !== deck.format) return;
+    status.classList.add('error');
+    status.textContent = `Could not refresh this deck check: ${error.message}`;
+  }
+}
 function renderSavedDecks() {
   $('#deck-count').textContent = `${state.savedDecks.length} saved deck${state.savedDecks.length === 1 ? '' : 's'}`;
   const formats = [['commander', 'Commander'], ['pauper', 'Pauper'], ['standard', 'Standard'], ['legacy', 'Legacy']];
-  const row = (deck, index) => `<div class="saved-deck-row"><button class="saved-deck" data-saved="${index}">${escapeHtml(deck.name)}<small>${deck.format === 'scanned' ? `Scan · fits: ${(deck.compatible_formats || []).map(name => name[0].toUpperCase() + name.slice(1)).join(', ') || 'choose a format to validate'}` : `Saved as ${escapeHtml(deck.format)}`}</small></button><button class="delete-deck" type="button" data-delete-deck="${index}" aria-label="Delete ${escapeHtml(deck.name)}" title="Delete deck">×</button></div>`;
+  const row = (deck, index) => {
+    const checked = deck.format !== 'scanned' && deck.validation?.valid;
+    const validation = deck.format === 'scanned' ? 'Choose format to validate'
+      : deck.ownership_mode === 'proposal' ? 'Quantity proposal'
+        : checked ? 'Validation passed' : deck.validation ? 'Validation needs review' : 'Validation not recorded';
+    const primer = deck.report?.primary_objective ? 'Primer available' : 'Primer pending';
+    const formatText = deck.format === 'scanned'
+      ? `Scan · fits: ${(deck.compatible_formats || []).map(name => name[0].toUpperCase() + name.slice(1)).join(', ') || 'choose a format to validate'}`
+      : `Saved as ${escapeHtml(deck.format)}`;
+    return `<div class="saved-deck-row"><button class="saved-deck" data-saved="${index}">${escapeHtml(deck.name)}<small>${formatText} · ${validation} · ${primer}</small></button><button class="delete-deck" type="button" data-delete-deck="${index}" aria-label="Delete ${escapeHtml(deck.name)}" title="Delete deck">×</button></div>`;
+  };
   const sections = formats.map(([format, label]) => {
     const matches = state.savedDecks.map((deck, index) => ({deck, index}))
       .filter(({deck}) => (deck.compatible_formats || [deck.format]).includes(format));
@@ -560,7 +625,10 @@ async function validateDeck() {
     }
     state.validatedDeckFingerprint = fingerprint;
     $('#save-deck').disabled = false;
-    status.classList.add('success'); status.textContent = 'Validation passed. Save the deck when you are ready.';
+    status.classList.add(validation.collection_complete === false ? 'error' : 'success');
+    status.textContent = validation.collection_complete === false
+      ? 'Format passed with collection quantity gaps. This proposal will not reserve copies; save when you are ready.'
+      : 'Validation passed. Save the deck when you are ready.';
   } catch (error) { status.classList.add('error'); status.textContent = error.message; }
 }
 async function saveDeck() {
@@ -586,7 +654,12 @@ async function saveDeck() {
 }
 $('#deck-card-list').addEventListener('click', event => { const button = event.target.closest('[data-add]'); if (button) addToDeck(button.dataset.card, button.dataset.add); });
 $('.deck-list-panel').addEventListener('click', event => { const add = event.target.closest('[data-add]'); const remove = event.target.closest('[data-remove]'); if (add) addToDeck(add.dataset.card, add.dataset.add); if (remove) removeFromDeck(remove.dataset.card, remove.dataset.remove); });
-$('#decks-view').addEventListener('click', event => { const preview = event.target.closest('[data-preview-index]'); if (preview) openCard(Number(preview.dataset.previewIndex)); });
+$('#decks-view').addEventListener('click', event => {
+  const commander = event.target.closest('[data-select-commander]');
+  if (commander) { event.preventDefault(); chooseScannedCommander(commander.dataset.selectCommander); return; }
+  const preview = event.target.closest('[data-preview-index]');
+  if (preview) openCard(Number(preview.dataset.previewIndex));
+});
 document.querySelectorAll('[data-deck-view]').forEach(button => button.addEventListener('click', () => { state.deckView = button.dataset.deckView; document.querySelectorAll('[data-deck-view]').forEach(item => { const active = item === button; item.classList.toggle('active', active); item.setAttribute('aria-pressed', String(active)); }); renderDeckBuilder(); }));
 $('#deck-search').addEventListener('input', renderDeckBuilder); $('#deck-format').addEventListener('change', onDeckFormatChange); $('#scanned-commander').addEventListener('change', event => chooseScannedCommander(event.target.value)); $('#deck-name').addEventListener('input', clearDeckValidation); $('#new-deck').addEventListener('click', newDeck); $('#create-deck').addEventListener('click', createNewDeck); $('#validate-deck').addEventListener('click', validateDeck); $('#save-deck').addEventListener('click', saveDeck);
 

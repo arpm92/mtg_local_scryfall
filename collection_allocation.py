@@ -45,6 +45,8 @@ def summarize_allocations(cards, decks):
     for deck in decks or ():
         if not isinstance(deck, Mapping):
             continue
+        if deck.get("ownership_mode") == "proposal":
+            continue
         deck_name = str(deck.get("name") or "Unnamed deck")
         for section in SECTIONS:
             entries = deck.get(section) or {}

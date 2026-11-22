@@ -100,6 +100,7 @@ def deck_from_submission(submitted):
     deck = {
         "name": str(submitted.get("name") or "Untitled Deck").strip()[:100],
         "format": format_name,
+        "ownership_mode": ("proposal" if submitted.get("ownership_mode") == "proposal" else "owned"),
         "main": submitted.get("main") or {},
         "sideboard": submitted.get("sideboard") or {},
         "commanders": submitted.get("commanders") or {},
@@ -190,7 +191,7 @@ def validate_deck_allocations(deck, cards, existing_decks, architect):
                 row["current_deck_name"] = str(current_deck.get("name") or deck.get("name") or "This deck")
                 row["current_deck_copies"] = current_deck_copies
             allocation_report.append(row)
-        if shortage:
+        if shortage and deck.get("ownership_mode") != "proposal":
             held = ", ".join("{} ({})".format(item["deck"], item["copies"]) for item in locations)
             copy_word = "copy" if count == 1 else "copies"
             message = "{} needs {} {}, but only {} are available after other deck reservations.".format(
@@ -199,6 +200,8 @@ def validate_deck_allocations(deck, cards, existing_decks, architect):
                 message += " Reserved in: {}.".format(held)
             errors.append(message)
     validation["allocation_report"] = allocation_report
+    validation["ownership_mode"] = deck.get("ownership_mode", "owned")
+    validation["collection_complete"] = not any(item.get("shortage") for item in allocation_report)
     validation["errors"] = errors
     validation["valid"] = not errors
     return validation

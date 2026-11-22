@@ -32,6 +32,9 @@ class CollectionWebTests(unittest.TestCase):
 
         self.assertIn("const engineDetails = report.engine_details || []", app_script)
         self.assertIn("report.engine_heading || 'Synergy engine'", app_script)
+        self.assertIn("report.connive_opening_estimate", app_script)
+        self.assertIn("Opening hand estimate", app_script)
+        self.assertIn("report.sideboard_strategy", app_script)
 
     def test_legacy_format_is_exposed_in_builder_battles_and_api_rules(self):
         handler = web.make_handler({}, architect=web.load_architect())
@@ -130,6 +133,30 @@ class CollectionWebTests(unittest.TestCase):
         self.assertIn("source_scanned_name: state.deckInfo.name", app_script)
         self.assertIn("function onDeckFormatChange()", app_script)
 
+    def test_scanned_commander_cards_offer_direct_selection(self):
+        index = (Path(web.ROOT) / "web" / "index.html").read_text(encoding="utf-8")
+        app_script = (Path(web.ROOT) / "web" / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn("data-select-commander=", app_script)
+        self.assertIn("Click a commander card in the main deck to select it", index)
+        self.assertIn("chooseScannedCommander(commander.dataset.selectCommander)", app_script)
+
+    def test_loading_a_saved_deck_refreshes_and_renders_its_validation(self):
+        app_script = (Path(web.ROOT) / "web" / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn("async function checkSavedDeck(deck)", app_script)
+        self.assertIn("fetch('/api/decks/validate'", app_script)
+        self.assertIn("checkSavedDeck(deck)", app_script)
+        self.assertIn("renderDeckValidation(result.validation)", app_script)
+
+    def test_saved_deck_list_shows_validation_and_primer_availability(self):
+        app_script = (Path(web.ROOT) / "web" / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn("deck.validation?.valid", app_script)
+        self.assertIn("deck.report?.primary_objective", app_script)
+        self.assertIn("Validation passed", app_script)
+        self.assertIn("Primer available", app_script)
+
     def test_scanned_deck_format_analysis_uses_owned_card_legality(self):
         architect = web.load_architect()
         cards = [{"name": "Forest", "quantity": 60, "type_line": "Basic Land — Forest",
@@ -195,6 +222,60 @@ class CollectionWebTests(unittest.TestCase):
             "reserved_elsewhere": 1, "available": 1, "shortage": 1,
             "locations": [{"deck": "Shang-Chi counters", "copies": 1}],
         }])
+
+    def test_proposed_deck_keeps_format_validity_separate_from_owned_quantity(self):
+        architect = web.load_architect()
+        cards = [
+            {"name": "Owned Common Creature", "quantity": 1, "type_line": "Creature",
+             "oracle_text": "", "legalities": {"legacy": "legal"}},
+            {"name": "Forest", "quantity": 60, "type_line": "Basic Land — Forest",
+             "oracle_text": "", "legalities": {"legacy": "legal"}},
+        ]
+        deck = {"name": "Quantity Proposal", "format": "legacy", "ownership_mode": "proposal",
+                "main": {"Owned Common Creature": 4, "Forest": 56}, "sideboard": {}, "commanders": {}}
+
+        result = web.validate_deck_allocations(deck, cards, [], architect)
+
+        self.assertTrue(result["valid"], result["errors"])
+        self.assertFalse(result["collection_complete"])
+        self.assertEqual(result["allocation_report"][0]["shortage"], 3)
+
+    def test_saving_a_quantity_proposal_skips_reservation_but_keeps_shortage_details(self):
+        architect = web.load_architect()
+        cards = [
+            {"name": "Owned Common Creature", "quantity": 1, "type_line": "Creature",
+             "oracle_text": "", "legalities": {"legacy": "legal"}},
+            {"name": "Forest", "quantity": 60, "type_line": "Basic Land — Forest",
+             "oracle_text": "", "legalities": {"legacy": "legal"}},
+        ]
+        decks_dir = self.root / "outputs" / "legacy"
+        decks_dir.mkdir(parents=True)
+        with patch.object(web, "ROOT", self.root):
+            server = ThreadingHTTPServer(("127.0.0.1", 0), web.make_handler(
+                {"cards": []}, architect=architect, engine_cards=cards
+            ))
+            thread = Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                body = json.dumps({
+                    "name": "Quantity Proposal", "format": "legacy", "ownership_mode": "proposal",
+                    "main": {"Owned Common Creature": 4, "Forest": 56},
+                    "sideboard": {}, "commanders": {},
+                    "report": {"primary_objective": "Preserve a clear testable plan."},
+                }).encode("utf-8")
+                request = Request("http://127.0.0.1:{}/api/decks".format(server.server_port),
+                                  data=body, headers={"Content-Type": "application/json"})
+                with urlopen(request) as response:
+                    result = json.loads(response.read())
+                self.assertTrue(result["deck"]["validation"]["valid"])
+                self.assertFalse(result["deck"]["validation"]["collection_complete"])
+                saved = json.loads((decks_dir / "quantity-proposal.json").read_text(encoding="utf-8"))
+                self.assertEqual(saved["ownership_mode"], "proposal")
+                self.assertEqual(saved["validation"]["allocation_report"][0]["shortage"], 3)
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=2)
 
     def test_validation_shows_current_deck_location_without_double_reserving_it(self):
         architect = web.load_architect()

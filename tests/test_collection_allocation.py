@@ -45,6 +45,15 @@ class CollectionAllocationTests(unittest.TestCase):
         self.assertEqual(result["abrade"]["reserved"], 2)
         self.assertEqual(result["abrade"]["available"], 3)
 
+    def test_proposed_decks_do_not_reserve_collection_copies(self):
+        result = annotate_card_availability(
+            [{"name": "Abrade", "quantity": 2}],
+            [{"name": "Proposed deck", "ownership_mode": "proposal", "main": {"Abrade": 4}}],
+        )
+
+        self.assertEqual(result[0]["availability"]["available"], 2)
+        self.assertEqual(result[0]["availability"]["reserved"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

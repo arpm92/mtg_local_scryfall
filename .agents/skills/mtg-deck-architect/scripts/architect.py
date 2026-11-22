@@ -413,13 +413,16 @@ def classify_commander_bracket(deck, forge_dir=DEFAULT_FORGE):
 
 def _forge_line(name, count, by_name):
     card = by_name.get(name.casefold())
-    if card and card["printings"]:
+    forge_name = name
+    if card and card.get("layout") not in (None, "", "normal") and " // " in name:
+        forge_name = name.split(" // ", 1)[0]
+    if card and card.get("printings"):
         printing = card["printings"][0]
         suffix = "|{}".format(printing["set"]) if printing["set"] else ""
         if printing["collector"]:
             suffix += "|[{}]".format(printing["collector"])
-        return "{} {}{}".format(count, name, suffix)
-    return "{} {}".format(count, name)
+        return "{} {}{}".format(count, forge_name, suffix)
+    return "{} {}".format(count, forge_name)
 
 
 def export_forge(deck, path, cards):
@@ -531,15 +534,45 @@ def save_bundle(deck, cards, output_root=None):
 
 def render_report(deck):
     report, validation = deck.get("report", {}), deck.get("validation", {})
+    counts = validation.get("counts", {})
+    check_status = "PASS" if validation.get("valid") else "FAIL"
+    if validation.get("collection_complete") is False and validation.get("valid"):
+        check_status = "FORMAT PASS — PROPOSAL HAS QUANTITY GAPS"
     sections = ["# {}".format(deck["name"]), "", "- Format: {}".format(deck["format"].title()),
                 "- Archetype: {}".format(deck.get("archetype", "")),
-                "- Validation: {}".format("PASS" if validation.get("valid") else "FAIL"), "",
-                "## Strategy", "", report.get("primary_objective", ""), "",
-                "- Early: {}".format(report.get("early_game", "")),
-                "- Mid: {}".format(report.get("middle_game", "")),
-                "- Late: {}".format(report.get("late_game", "")),
-                "- Win conditions: {}".format(", ".join(report.get("win_conditions", [])) or "No distinct heuristic finishers identified"),
-                "- Weaknesses: {}".format("; ".join(report.get("weaknesses", []))), "", "## Decklist", ""]
+                "- Validation: {}".format(check_status), "",
+                "## Deck check", "",
+                "- Main / sideboard / commanders: {} / {} / {}".format(
+                    counts.get("main", sum(deck.get("main", {}).values())),
+                    counts.get("sideboard", sum(deck.get("sideboard", {}).values())),
+                    counts.get("commanders", sum(deck.get("commanders", {}).values()))),
+                "- Collection quantities: {}".format(
+                    "complete" if validation.get("collection_complete", True) else "short; this proposal reserves no owned copies"), ""]
+    if validation.get("errors"):
+        sections.extend(["- Issues: {}".format("; ".join(validation["errors"])), ""])
+    sections.extend(["## Strategy", "", report.get("primary_objective", ""), "",
+                     "- Early: {}".format(report.get("early_game", "")),
+                     "- Mid: {}".format(report.get("middle_game", "")),
+                     "- Late: {}".format(report.get("late_game", "")), "",
+                     "### Win conditions", ""])
+    sections.extend("- {}".format(item) for item in report.get("win_conditions", []))
+    if not report.get("win_conditions"):
+        sections.append("- No distinct heuristic finishers identified.")
+    sections.extend(["", "### Known weaknesses", ""])
+    sections.extend("- {}".format(item) for item in report.get("weaknesses", []))
+    if not report.get("weaknesses"):
+        sections.append("- None recorded.")
+    role_sections = (("Interaction", "interaction"), ("Protection", "protection"), ("Recovery", "recovery"))
+    if any(report.get(key) for _, key in role_sections):
+        sections.extend(["", "## Card roles", ""])
+        for heading, key in role_sections:
+            if report.get(key):
+                sections.append("- **{}:** {}".format(heading, ", ".join(report[key])))
+    if report.get("mana_curve"):
+        sections.extend(["", "## Mana", "", "- Lands: {}".format(report.get("land_count", "not recorded")),
+                         "- Nonland curve: {}".format(" · ".join(
+                             "{} mana: {}".format(value, count)
+                             for value, count in report["mana_curve"].items())), ""])
     for heading, key in (("Commander", "commanders"), ("Main", "main"), ("Sideboard", "sideboard")):
         if deck.get(key):
             sections.extend(["### {}".format(heading), ""])
@@ -550,8 +583,8 @@ def render_report(deck):
         sections.extend(["## {}".format(report.get("engine_heading", "Synergy engine")), ""])
         sections.extend("- {}".format(detail) for detail in engine_details)
         sections.append("")
-    if validation.get("errors"):
-        sections.extend(["## Validation errors", ""] + ["- " + error for error in validation["errors"]])
+    if report.get("sideboard_strategy"):
+        sections.extend(["## Sideboard plan", "", report["sideboard_strategy"], ""])
     evidence = deck.get("forge_evidence")
     if evidence:
         sections.extend(["## Forge evidence", "", "- Status: {}".format(evidence.get("status", "not run"))])

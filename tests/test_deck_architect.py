@@ -82,6 +82,19 @@ class DeckArchitectTests(unittest.TestCase):
         self.assertIn("[Main]", text)
         self.assertIn("[Sideboard]", text)
 
+    def test_forge_export_uses_front_face_name_for_multiface_layouts(self):
+        card = make_card("Blossom-Blessed Angel // Seed Suture", type_line="Creature — Angel // Sorcery")
+        card["layout"] = "transform"
+        deck = {"name": "Prepared Angels", "format": "legacy",
+                "main": {card["name"]: 4}, "sideboard": {}, "commanders": {}}
+
+        with tempfile.TemporaryDirectory() as temp:
+            path = engine.export_forge(deck, Path(temp) / "angels.dck", [card])
+            text = path.read_text(encoding="utf-8")
+
+        self.assertIn("4 Blossom-Blessed Angel|TST|[1]", text)
+        self.assertNotIn("Blossom-Blessed Angel // Seed Suture", text)
+
     def test_deck_report_shows_forge_limitations_and_evidence(self):
         text = engine.render_report({
             "name": "Legacy Test", "format": "legacy", "main": {"Island": 60},
@@ -106,6 +119,25 @@ class DeckArchitectTests(unittest.TestCase):
         })
         self.assertIn("## Connive engine · 11 direct sources", text)
         self.assertIn("Red Room Recruit connives on entry.", text)
+
+    def test_rendered_report_includes_validation_packages_curve_and_sideboard_plan(self):
+        text = engine.render_report({
+            "name": "Primer Test", "format": "legacy",
+            "main": {"Island": 60}, "sideboard": {}, "commanders": {},
+            "validation": {"valid": True, "counts": {"main": 60}},
+            "report": {
+                "primary_objective": "Win through tempo.", "interaction": ["Unsummon"],
+                "protection": ["Kid Loki"], "recovery": ["Twinned Vision"],
+                "mana_curve": {"1": 4, "2": 12}, "land_count": 20,
+                "sideboard_strategy": "Bring counters against large spells.",
+            },
+        })
+
+        self.assertIn("## Deck check", text)
+        self.assertIn("## Card roles", text)
+        self.assertIn("Unsummon", text)
+        self.assertIn("1 mana: 4", text)
+        self.assertIn("Bring counters against large spells.", text)
 
     def test_forge_runner_refuses_wrong_player_count_before_launch(self):
         value = engine.run_forge_simulation(["one.dck"], "pauper")
