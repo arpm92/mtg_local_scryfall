@@ -154,6 +154,17 @@ function openCard(index) {
   $('#dialog-content').innerHTML = `<div class="dialog-layout">${art}<div class="dialog-copy"><h2>${escapeHtml(card.name)}</h2><p class="dialog-meta">${card.printings.length} owned printing${card.printings.length === 1 ? '' : 's'} · ${card.quantity} copies</p>${commanderControl}<p>${escapeHtml(card.manaCost)}</p><p class="dialog-type">${escapeHtml(card.typeLine)}</p><p class="dialog-rules">${escapeHtml(card.oracleText) || '<i>No rules text</i>'}</p><div class="dialog-tags">${tags.map(x => `<span>${escapeHtml(x)}</span>`).join('')}</div>${availabilityView}<h3 class="printing-title">Owned printings</h3><table class="printing-list"><thead><tr><th>Art</th><th>Printing</th><th>Rarity</th><th>Finish</th><th>Lang</th><th>Qty</th></tr></thead><tbody>${rows}</tbody></table>${card.scryfallUrl ? `<p><a class="scryfall-link" href="${escapeHtml(card.scryfallUrl)}" target="_blank" rel="noopener">Open on Scryfall ↗</a></p>` : ''}</div></div>`;
   $('#card-dialog').showModal();
 }
+function openDeckCatalogCard(name) {
+  const card = state.deckInfo?.display_cards?.[name];
+  if (!card) return;
+  const rows = state.deckValidation?.allocation_report || state.deckInfo.validation?.allocation_report || [];
+  const allocation = rows.find(item => item.card_name === name);
+  const owned = Number(allocation?.owned || 0); const shortage = Number(allocation?.shortage || 0);
+  const status = shortage ? (owned ? `Short ${shortage} copies` : 'Not owned') : 'Owned';
+  const art = card.imageUrl ? `<img src="${escapeHtml(card.imageUrl)}" alt="${escapeHtml(name)}">` : '<div class="dialog-art-placeholder"></div>';
+  $('#dialog-content').innerHTML = `<div class="dialog-layout">${art}<div class="dialog-copy"><h2>${escapeHtml(card.name)}</h2><p class="dialog-meta">${escapeHtml(status)} · Scryfall Oracle data</p><p>${escapeHtml(card.manaCost || '')} · MV ${Number(card.manaValue || 0)}</p><p class="dialog-type">${escapeHtml(card.typeLine || '')}</p><p class="dialog-rules">${escapeHtml(card.oracleText || '') || '<i>No rules text</i>'}</p>${card.scryfallUrl ? `<p><a class="scryfall-link" href="${escapeHtml(card.scryfallUrl)}" target="_blank" rel="noopener">Open on Scryfall ↗</a></p>` : ''}</div></div>`;
+  $('#card-dialog').showModal();
+}
 
 search.addEventListener('input', applyFilters);
 controls.forEach(control => control.addEventListener('change', applyFilters));
@@ -275,22 +286,36 @@ function deckCategory(card) {
   const type = card?.typeLine || '';
   return ['Land', 'Creature', 'Planeswalker', 'Battle', 'Artifact', 'Enchantment', 'Instant', 'Sorcery'].find(item => type.includes(item)) || 'Other';
 }
+function deckCardForDisplay(name) {
+  return state.all.find(item => item.name === name) || state.deckInfo?.display_cards?.[name] || null;
+}
+function deckOwnershipStatus(name, count) {
+  const validation = state.deckValidation || state.deckInfo?.validation || {};
+  const row = (validation.allocation_report || []).find(item => item.card_name === name);
+  const shortage = Number(row?.shortage || 0);
+  if (!shortage) return '';
+  return Number(row?.owned || 0) === 0 ? 'NOT OWNED' : `SHORT ${shortage}`;
+}
 function deckVisualCard(name, count, section) {
-  const card = state.all.find(item => item.name === name);
+  const card = deckCardForDisplay(name);
   const art = card?.imageUrl
     ? `<img src="${escapeHtml(card.imageUrl)}" alt="${escapeHtml(name)}" loading="lazy">`
     : `<span class="deck-art-fallback">${escapeHtml(name)}</span>`;
-  const preview = card ? `data-preview-index="${card.index}"` : '';
+  const preview = Number.isInteger(card?.index) ? `data-preview-index="${card.index}"` : card ? `data-deck-card="${escapeHtml(name)}"` : '';
   const actions = state.deckInfo?.format === 'scanned' ? '' : `<span class="deck-card-actions"><button type="button" data-remove="${section}" data-card="${escapeHtml(name)}" aria-label="Remove ${escapeHtml(name)}">−</button><button type="button" data-add="${section}" data-card="${escapeHtml(name)}" aria-label="Add another ${escapeHtml(name)}">+</button></span>`;
+  const status = deckOwnershipStatus(name, count);
+  const oracle = card?.oracleText ? `<details class="deck-card-oracle"><summary>Oracle text</summary><p>${escapeHtml(card.oracleText)}</p>${card.scryfallUrl ? `<a href="${escapeHtml(card.scryfallUrl)}" target="_blank" rel="noopener">Scryfall</a>` : ''}</details>` : '';
   return `<article class="deck-visual-card">
     <span class="deck-qty">${count}×</span>
     <button class="deck-card-art" type="button" ${preview} aria-label="View ${escapeHtml(name)}">${art}</button>
+    ${status ? `<span class="deck-ownership-ribbon">${escapeHtml(status)}</span>` : ''}
     ${actions}
     <span class="deck-visual-name" title="${escapeHtml(name)}">${escapeHtml(name)}</span>
+    ${oracle}
   </article>`;
 }
 function renderDeckSection(container, section) {
-  const entries = Object.entries(state.deck[section]).map(([name, count]) => ({name, count, card: state.all.find(item => item.name === name)}));
+  const entries = Object.entries(state.deck[section]).map(([name, count]) => ({name, count, card: deckCardForDisplay(name)}));
   if (!entries.length) { container.innerHTML = '<p class="muted">No cards in this section.</p>'; return; }
   const groups = new Map();
   entries.sort((a,b) => (a.card?.manaValue || 0) - (b.card?.manaValue || 0) || a.name.localeCompare(b.name)).forEach(entry => {
@@ -423,6 +448,7 @@ function renderDeckBuilder() {
   const hasCards = ['main', 'sideboard', 'commanders'].some(section => Object.keys(state.deck[section] || {}).length);
   $('#export-deck').disabled = !hasCards;
   $('#copy-deck-export').disabled = !hasCards;
+  updateUnownedCsvButton();
   $('#simulate-deck').disabled = !state.deckInfo || scanned || format === 'scanned' || !state.simulationAvailable;
   $('#test-hand').disabled = !state.deckInfo || scanned || format === 'scanned';
   updateBattleButton();
@@ -461,6 +487,27 @@ function renderDeckBuilder() {
     renderDeckSection(container, section);
   });
   renderTokens();
+}
+function updateUnownedCsvButton() {
+  const button = $('#download-unowned-csv');
+  if (!button) return;
+  const validation = state.deckValidation || state.deckInfo?.validation || {};
+  button.hidden = !state.deckInfo || !(validation.allocation_report || []).some(item => Number(item.shortage || 0) > 0);
+}
+async function downloadUnownedCsv() {
+  const deck = state.deckInfo;
+  if (!deck) return;
+  const url = `/api/decks/unowned.csv?format=${encodeURIComponent(deck.format)}&name=${encodeURIComponent(deck.name)}`;
+  try {
+    const response = await fetch(url, {cache: 'no-store'});
+    if (!response.ok) throw new Error('The server has no missing-cards CSV for this deck yet.');
+    const blob = await response.blob(); const objectUrl = URL.createObjectURL(blob);
+    const link = document.createElement('a'); link.href = objectUrl;
+    link.download = `${MtgDeckExport.filename(deck, 'csv').replace(/\.csv$/i, '')}-unowned.csv`;
+    document.body.append(link); link.click(); link.remove(); window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+  } catch (error) {
+    $('#deck-status').className = 'deck-status error'; $('#deck-status').textContent = error.message;
+  }
 }
 function clearDeckValidation() {
   state.validatedDeckFingerprint = null;
@@ -641,6 +688,7 @@ async function checkSavedDeck(deck) {
     if (!response.ok) throw new Error(result.error || 'Could not check this saved deck.');
     if (state.deckInfo?.name !== deck.name || state.deckInfo?.format !== deck.format) return;
     state.deckValidation = result.validation || {};
+    state.deckInfo.validation = state.deckValidation;
     renderDeckValidation(state.deckValidation);
     status.classList.add(state.deckValidation.valid && state.deckValidation.collection_complete !== false ? 'success' : 'error');
     status.textContent = state.deckValidation.valid && state.deckValidation.collection_complete === false
@@ -648,6 +696,7 @@ async function checkSavedDeck(deck) {
       : state.deckValidation.valid
         ? 'Saved deck check passed: format rules and current card availability are valid.'
       : 'Saved deck check found issues. Review the results table below.';
+    renderDeckBuilder();
   } catch (error) {
     if (state.deckInfo?.name !== deck.name || state.deckInfo?.format !== deck.format) return;
     status.classList.add('error');
@@ -751,16 +800,22 @@ async function saveDeck() {
     status.textContent = incomplete
       ? `Saved as a draft and exported to outputs/${payload.format}. Review the validation table; the strategy and winning conditions are below.`
       : `Saved and exported to outputs/${payload.format}. Strategy and winning conditions are below.`;
-    state.savedDecks = await fetch('/api/decks').then(r => r.json()); renderSavedDecks();
+    state.savedDecks = await fetch('/api/decks').then(r => r.json());
+    state.deckInfo = state.savedDecks.find(deck => deck.name === payload.name && deck.format === payload.format) || state.deckInfo;
+    state.deckValidation = state.deckInfo?.validation || state.deckValidation;
+    renderSavedDecks(); renderDeckBuilder();
   } catch (error) { status.classList.add('error'); status.textContent = error.message; }
 }
 $('#deck-card-list').addEventListener('click', event => { const button = event.target.closest('[data-add]'); if (button) addToDeck(button.dataset.card, button.dataset.add); });
 $('#export-deck').addEventListener('click', exportCurrentDeck);
 $('#copy-deck-export').addEventListener('click', copyCurrentDeckExport);
+$('#download-unowned-csv').addEventListener('click', downloadUnownedCsv);
 $('.deck-list-panel').addEventListener('click', event => { const add = event.target.closest('[data-add]'); const remove = event.target.closest('[data-remove]'); if (add) addToDeck(add.dataset.card, add.dataset.add); if (remove) removeFromDeck(remove.dataset.card, remove.dataset.remove); });
 $('#decks-view').addEventListener('click', event => {
   const preview = event.target.closest('[data-preview-index]');
   if (preview) openCard(Number(preview.dataset.previewIndex));
+  const catalogCard = event.target.closest('[data-deck-card]');
+  if (catalogCard) openDeckCatalogCard(catalogCard.dataset.deckCard);
 });
 $('#dialog-content').addEventListener('change', event => {
   const toggle = event.target.closest('#scanned-commander-toggle');
@@ -1092,6 +1147,8 @@ async function saveChatDeck(index) {
     $('#chat-deck').value = result.deck.name;
     try { await reloadCollection(); } catch { /* The saved deck remains available even if collection refresh fails. */ }
     try { state.savedDecks = await fetch('/api/decks', {cache: 'no-store'}).then(r => r.json()); } catch { /* Keep the successful save response in local state. */ }
+    state.deckInfo = state.savedDecks.find(deck => deck.name === result.deck.name && deck.format === result.deck.format) || state.deckInfo;
+    state.deckValidation = state.deckInfo?.validation || state.deckValidation;
     renderSavedDecks();
     renderDeckBuilder();
   } catch (error) {

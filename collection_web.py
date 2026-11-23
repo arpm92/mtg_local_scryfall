@@ -16,9 +16,9 @@ import traceback
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
-from enrich_mtg_collection import iter_oracle_cards, read_csv
+from enrich_mtg_collection import card_field, iter_oracle_cards, read_csv
 from collection_allocation import annotate_card_availability, summarize_allocations
 from collection_import import CollectionImportStore, prepare_upload
 from forge_simulation import ForgeSimulationService, SimulationBusyError
@@ -44,6 +44,7 @@ def deck_compatible_formats(deck, cards, architect):
     """Return formats in which the deck's cards and structure pass validation."""
     if not isinstance(deck, dict):
         return []
+    cards = merge_deck_catalog(deck, cards)
     validator = getattr(architect, "validate_deck", None)
     if not callable(validator):
         return []
@@ -90,6 +91,102 @@ def deck_compatible_formats(deck, cards, architect):
         if result.get("valid"):
             compatible.append(format_name)
     return compatible
+
+
+def catalog_record_from_scryfall(card):
+    """Convert a Scryfall bulk record into the deck validator's card shape."""
+    colors = card.get("colors")
+    if colors is None:
+        colors = sorted({color for face in card.get("card_faces") or []
+                         for color in face.get("colors") or []})
+    produced = card.get("produced_mana")
+    if produced is None:
+        produced = sorted({color for face in card.get("card_faces") or []
+                           for color in face.get("produced_mana") or []})
+    return {
+        "name": str(card.get("name") or ""), "quantity": 0,
+        "type_line": card_field(card, "type_line"),
+        "oracle_text": card_field(card, "oracle_text"),
+        "mana_cost": card_field(card, "mana_cost"),
+        "mana_value": float(card.get("cmc") or 0),
+        "colors": colors or [], "color_identity": card.get("color_identity") or [],
+        "keywords": card.get("keywords") or [], "produced_mana": produced or [],
+        "legalities": card.get("legalities") or {}, "layout": card.get("layout") or "",
+        "power": card_field(card, "power"), "toughness": card_field(card, "toughness"),
+        "rarity": card.get("rarity") or "", "set": card.get("set") or "",
+        "set_name": card.get("set_name") or "", "scryfall_uri": card.get("scryfall_uri") or "",
+        "image_uris": card.get("image_uris") or {},
+        "card_faces": card.get("card_faces") or [],
+    }
+
+
+def merge_deck_catalog(deck, owned_cards):
+    """Use a proposal's Scryfall records for rules checks, never for ownership."""
+    result = list(owned_cards or [])
+    known = {str(card.get("name") or "").casefold() for card in result}
+    for card in deck.get("card_catalog") or []:
+        name = str(card.get("name") or "").casefold()
+        if name and name not in known:
+            result.append(card)
+            known.add(name)
+    return result
+
+
+def attach_scryfall_catalog(deck, owned_cards, bulk_path):
+    """Attach local Scryfall records for deck entries absent from owned inventory."""
+    return attach_scryfall_catalogs([deck], owned_cards, bulk_path).get(0, [])
+
+
+def attach_scryfall_catalogs(decks, owned_cards, bulk_path):
+    """Resolve missing names for many decks in one pass over the compressed bulk file."""
+    owned_names = {str(card.get("name") or "").casefold() for card in owned_cards or []}
+    requested_by_deck = {}
+    for index, deck in enumerate(decks):
+        existing = {str(card.get("name") or "").casefold() for card in deck.get("card_catalog") or []}
+        requested_by_deck[index] = {
+            str(name).strip().casefold()
+            for section in ("main", "sideboard", "commanders")
+            for name in (deck.get(section) or {})
+            if str(name).strip().casefold() not in owned_names | existing
+        }
+    requested = set().union(*requested_by_deck.values()) if requested_by_deck else set()
+    if not requested or not bulk_path or not Path(bulk_path).is_file():
+        return {}
+    resolved = {}
+    for card in iter_oracle_cards(Path(bulk_path)):
+        name = str(card.get("name") or "").casefold()
+        if name in requested:
+            resolved[name] = catalog_record_from_scryfall(card)
+            requested.discard(name)
+            if not requested:
+                break
+    changed = {}
+    for index, names in requested_by_deck.items():
+        found = [resolved[name] for name in names if name in resolved]
+        if found:
+            decks[index].setdefault("card_catalog", []).extend(found)
+            changed[index] = found
+    return changed
+
+
+def display_cards_for_deck(deck):
+    """Expose Scryfall metadata in the browser separately from the collection."""
+    display = {}
+    for card in deck.get("card_catalog") or []:
+        front, back = card_images(card)
+        display[card["name"]] = {
+            "name": card["name"], "quantity": 0, "ownedCopies": 0,
+            "typeLine": card.get("type_line") or "",
+            "manaCost": card.get("mana_cost") or "",
+            "manaValue": card.get("mana_value") or 0,
+            "oracleText": card.get("oracle_text") or "",
+            "imageUrl": front, "backImageUrl": back,
+            "scryfallUrl": card.get("scryfall_uri") or "",
+            "rarity": card.get("rarity") or "",
+            "setCodes": [card.get("set")] if card.get("set") else [],
+            "printings": [], "colorIdentity": card.get("color_identity") or [],
+        }
+    return display
 
 
 def deck_from_submission(submitted):
@@ -145,14 +242,21 @@ def validate_deck_allocations(deck, cards, existing_decks, architect):
         item for item in existing_decks or ()
         if item is not current_deck
     ]
+    validation_cards = merge_deck_catalog(deck, cards)
     validation = architect.validate_deck(
-        deck, cards, format_name=format_name, respect_ownership=False
+        deck, validation_cards, format_name=format_name, respect_ownership=False
     )
     available_cards = annotate_card_availability(cards, other_decks)
     inventory = {
         re.sub(r"\s+", " ", str(card.get("name") or "")).strip().casefold(): card
         for card in available_cards
     }
+    for card in deck.get("card_catalog") or []:
+        key = re.sub(r"\s+", " ", str(card.get("name") or "")).strip().casefold()
+        if key and key not in inventory:
+            inventory[key] = dict(card, quantity=0, availability={
+                "totalOwned": 0, "available": 0, "reservedByDeck": [],
+            })
     needed = {}
     for section in ("main", "sideboard", "commanders"):
         for card_name, raw_count in (deck.get(section) or {}).items():
@@ -598,6 +702,17 @@ def make_handler(payload, architect=None, engine_cards=None, auth_username="", a
                     except (OSError, ValueError):
                         continue
             result.extend(import_store.scanned_decks())
+            catalog_changed = set(attach_scryfall_catalogs(
+                result, state.get("engine_cards", []), bulk_path
+            ))
+            for index, deck in enumerate(result):
+                if (architect and index in catalog_changed
+                        and deck.get("format") in ("commander", "pauper", "standard", "legacy")):
+                    deck["validation"] = validate_deck_allocations(
+                        deck, state.get("engine_cards", []), result, architect
+                    )
+                    if architect:
+                        architect.save_bundle(deck, state.get("engine_cards", []), ROOT / "outputs")
             return result
 
         def do_GET(self):
@@ -629,10 +744,35 @@ def make_handler(payload, architect=None, engine_cards=None, auth_username="", a
             if path == "/api/decks":
                 decks = self.saved_decks()
                 for deck in decks:
+                    deck["display_cards"] = display_cards_for_deck(deck)
                     deck["compatible_formats"] = deck_compatible_formats(
                         deck, state.get("engine_cards", []), architect
                     ) if architect else []
                 self.send_json(200, decks)
+                return
+            if path == "/api/decks/unowned.csv":
+                query = parse_qs(urlparse(self.path).query)
+                format_name = str((query.get("format") or [""])[0]).casefold()
+                deck_name = str((query.get("name") or [""])[0])
+                deck = next((item for item in self.saved_decks()
+                             if item.get("name") == deck_name and item.get("format") == format_name), None)
+                if not deck or not architect:
+                    self.send_error(404, "Unowned card list not found.")
+                    return
+                slug = re.sub(r"[^a-z0-9]+", "-", deck_name.casefold()).strip("-") or "deck"
+                format_dir = (ROOT / "outputs" / format_name).resolve()
+                target = (format_dir / (slug + "-unowned.csv")).resolve()
+                if target.parent != format_dir or not target.is_file():
+                    self.send_error(404, "This deck has no missing-card CSV.")
+                    return
+                body = target.read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/csv; charset=utf-8")
+                self.send_header("Content-Disposition", 'attachment; filename="{}"'.format(target.name))
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(body)
                 return
             if path == "/api/chat/status":
                 self.send_json(200, chat.status() if chat else {"available": False, "message": "Codex chat is not configured."})
@@ -700,6 +840,7 @@ def make_handler(payload, architect=None, engine_cards=None, auth_username="", a
                         self.send_json(503, {"error": "Deck architect is not configured."})
                         return
                     deck = deck_from_submission(submitted)
+                    attach_scryfall_catalog(deck, state.get("engine_cards", []), bulk_path)
                     validation = validate_deck_allocations(
                         deck, state.get("engine_cards", []), self.saved_decks(), architect
                     )
@@ -837,6 +978,7 @@ def make_handler(payload, architect=None, engine_cards=None, auth_username="", a
                             self.send_json(200, {"answer": created["clarification"]})
                             return
                         deck = created["deck"]
+                        attach_scryfall_catalog(deck, state.get("engine_cards", []), bulk_path)
                         validation = validate_deck_allocations(
                             deck, state["engine_cards"], self.saved_decks(), architect
                         )
@@ -852,6 +994,7 @@ def make_handler(payload, architect=None, engine_cards=None, auth_username="", a
                     self.send_json(200, {"answer": answer})
                     return
                 deck = deck_from_submission(submitted)
+                attach_scryfall_catalog(deck, state.get("engine_cards", []), bulk_path)
                 validation = validate_deck_allocations(
                     deck, state.get("engine_cards", []), self.saved_decks(), architect
                 )

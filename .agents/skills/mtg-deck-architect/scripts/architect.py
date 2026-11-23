@@ -633,7 +633,57 @@ def save_bundle(deck, cards, output_root=None):
     export_forge(deck, dck_path, cards)
     report_path = output_root / (slug + "-report.md")
     report_path.write_text(render_report(deck), encoding="utf-8")
-    return {"json": str(json_path), "forge": str(dck_path), "report": str(report_path)}
+    unowned_csv = export_unowned_csv(deck, cards, output_root / (slug + "-unowned.csv"))
+    files = {"json": str(json_path), "forge": str(dck_path), "report": str(report_path)}
+    if unowned_csv:
+        files["unowned_csv"] = str(unowned_csv)
+    return files
+
+
+def export_unowned_csv(deck, cards, target):
+    """Write one purchase row per card with a shortfall, enriched from Scryfall metadata."""
+    shortages = [item for item in (deck.get("validation") or {}).get("allocation_report", [])
+                 if int(item.get("shortage", 0) or 0) > 0]
+    if not shortages:
+        shortages = [{
+            "card_name": item.get("card"), "needed": item.get("deck_count", 0),
+            "owned": item.get("owned", 0), "reserved_elsewhere": 0,
+            "available": item.get("owned", 0), "shortage": item.get("to_buy", 0),
+        } for item in (deck.get("ownership_summary") or {}).get("cards_to_buy", [])
+            if int(item.get("to_buy", 0) or 0) > 0]
+    if not shortages:
+        return None
+    by_name = {str(card.get("name") or "").casefold(): card for card in cards or []}
+    by_name.update({str(card.get("name") or "").casefold(): card
+                    for card in deck.get("card_catalog") or []})
+    fields = ["Cardmarket import line", "Card", "Sections", "Needed", "Owned",
+              "Reserved elsewhere", "Available", "Missing copies", "Card type",
+              "Mana cost", "Mana value", "Oracle text", "Scryfall URL"]
+    with Path(target).open("w", encoding="utf-8-sig", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields)
+        writer.writeheader()
+        for shortage in shortages:
+            name = str(shortage.get("card_name") or "")
+            card = by_name.get(name.casefold(), {})
+            sections = [section.title() for section in ("main", "sideboard", "commanders")
+                        if any(str(card_name).casefold() == name.casefold()
+                               for card_name in (deck.get(section) or {}))]
+            printings = card.get("printings") or []
+            scryfall_url = card.get("scryfall_uri") or ""
+            if not scryfall_url and printings and printings[0].get("scryfall_id"):
+                scryfall_url = "https://scryfall.com/card/{}".format(printings[0]["scryfall_id"])
+            missing = int(shortage.get("shortage", 0) or 0)
+            writer.writerow({
+                "Cardmarket import line": "{} {}".format(missing, name),
+                "Card": name, "Sections": ", ".join(sections),
+                "Needed": shortage.get("needed", 0), "Owned": shortage.get("owned", 0),
+                "Reserved elsewhere": shortage.get("reserved_elsewhere", 0),
+                "Available": shortage.get("available", 0), "Missing copies": missing,
+                "Card type": card.get("type_line", ""), "Mana cost": card.get("mana_cost", ""),
+                "Mana value": card.get("mana_value", ""), "Oracle text": card.get("oracle_text", ""),
+                "Scryfall URL": scryfall_url,
+            })
+    return Path(target)
 
 
 def render_report(deck):

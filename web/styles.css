@@ -211,6 +211,11 @@ kbd { color: var(--muted); border: 1px solid var(--line); border-radius: 4px; pa
 .deck-visual-card .deck-card-art { display: block; width: 100%; padding: 0; color: var(--text); background: #0d0f12; border: 0; border-radius: inherit; overflow: hidden; box-shadow: 0 7px 18px #0009; }
 .deck-visual-card img, .deck-art-fallback { display: block; width: 100%; aspect-ratio: 488/680; object-fit: cover; }
 .deck-art-fallback { padding: 12px; background: linear-gradient(145deg,#343a43,#13161b); font: 700 13px/1.25 Georgia,serif; text-align: left; }
+.deck-ownership-ribbon { position: absolute; top: 8px; right: 6px; z-index: 3; padding: 4px 6px; color: #fff; background: #9f332e; border: 1px solid #ffd2cd; border-radius: 4px; box-shadow: 0 2px 6px #000b; font-size: 8px; font-weight: 900; letter-spacing: .04em; line-height: 1; }
+.deck-card-oracle { margin-top: 5px; color: var(--muted); font-size: 11px; }
+.deck-card-oracle summary { color: var(--accent-2); cursor: pointer; }
+.deck-card-oracle p { margin: 4px 0; white-space: pre-line; line-height: 1.4; }
+.deck-card-oracle a { color: var(--accent-2); }
 .deck-visual-card:hover .deck-card-art, .deck-visual-card:focus-within .deck-card-art { outline: 2px solid var(--accent); transform: translateY(-2px); }
 .deck-qty { position: absolute; top: 6px; left: 6px; z-index: 2; min-width: 29px; padding: 3px 7px; color: #15120e; background: var(--accent); border: 1px solid #fff0d5; border-radius: 999px; font-weight: 850; text-align: center; box-shadow: 0 2px 7px #000b; }
 .deck-card-actions { position: absolute; right: 6px; bottom: 29px; z-index: 2; display: flex; gap: 4px; opacity: 0; transition: opacity .15s; }
@@ -223,6 +228,8 @@ kbd { color: var(--muted); border: 1px solid var(--line); border-radius: 4px; pa
 .deck-list-view .deck-qty { position: static; grid-column: 3; grid-row: 1; margin-right: 82px; }
 .deck-list-view .deck-card-actions { right: 4px; bottom: 8px; opacity: 1; }
 .deck-list-view .deck-visual-name { grid-column: 2; grid-row: 1; padding: 0; font-size: 14px; }
+.deck-list-view .deck-ownership-ribbon { top: 50%; right: 94px; transform: translateY(-50%); }
+.deck-list-view .deck-card-oracle { grid-column: 2 / 4; margin: 0 8px 6px; }
 .deck-chat { margin: 18px 0 28px; padding: 18px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
 .deck-chat-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .deck-chat-heading h2 { margin: 0; color: var(--accent-2); font: 700 24px Georgia,serif; }

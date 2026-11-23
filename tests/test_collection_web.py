@@ -241,6 +241,147 @@ class CollectionWebTests(unittest.TestCase):
         self.assertFalse(result["collection_complete"])
         self.assertEqual(result["allocation_report"][0]["shortage"], 3)
 
+    def test_unowned_scryfall_catalog_cards_validate_and_keep_missing_quantity_visible(self):
+        architect = web.load_architect()
+        cards = [{"name": "Forest", "quantity": 60, "type_line": "Basic Land — Forest",
+                  "oracle_text": "", "legalities": {"pauper": "legal"}}]
+        catalog_card = {
+            "name": "Catalog Goblin", "quantity": 0, "type_line": "Creature — Goblin",
+            "oracle_text": "Haste", "mana_cost": "{R}", "mana_value": 1,
+            "colors": ["R"], "color_identity": ["R"], "keywords": ["Haste"],
+            "legalities": {"pauper": "legal"}, "image_uris": {}, "scryfall_uri": "https://scryfall.com/card/test/1",
+        }
+        deck = {
+            "name": "Purchase Proposal", "format": "pauper", "ownership_mode": "proposal",
+            "main": {"Catalog Goblin": 4, "Forest": 56}, "sideboard": {}, "commanders": {},
+            "card_catalog": [catalog_card],
+        }
+
+        result = web.validate_deck_allocations(deck, cards, [], architect)
+        compatible = web.deck_compatible_formats(deck, cards, architect)
+
+        self.assertTrue(result["valid"], result["errors"])
+        self.assertFalse(result["collection_complete"])
+        missing = next(row for row in result["allocation_report"] if row["card_name"] == "Catalog Goblin")
+        self.assertEqual((missing["owned"], missing["available"], missing["shortage"]), (0, 0, 4))
+        self.assertIn("pauper", compatible)
+
+    def test_unowned_deck_card_metadata_is_loaded_from_the_local_scryfall_bulk(self):
+        bulk = self.root / "oracle.json"
+        bulk.write_text(json.dumps([{
+            "name": "Catalog Goblin", "type_line": "Creature — Goblin", "oracle_text": "Haste",
+            "mana_cost": "{R}", "cmc": 1, "colors": ["R"], "color_identity": ["R"],
+            "keywords": ["Haste"], "legalities": {"pauper": "legal"},
+            "scryfall_uri": "https://scryfall.com/card/test/1",
+            "image_uris": {"normal": "https://cards.scryfall.io/normal/front/test.jpg"},
+        }]), encoding="utf-8")
+        deck = {"name": "Purchase Proposal", "format": "pauper",
+                "main": {"Catalog Goblin": 4}, "sideboard": {}, "commanders": {}}
+
+        added = web.attach_scryfall_catalog(deck, [], bulk)
+
+        self.assertEqual(len(added), 1)
+        self.assertEqual(deck["card_catalog"][0]["oracle_text"], "Haste")
+        self.assertEqual(deck["card_catalog"][0]["quantity"], 0)
+
+    def test_saved_purchase_proposal_uses_catalog_for_format_display_and_csv_download(self):
+        import gzip
+        bulk = self.root / "oracle_cards.jsonl.gz"
+        record = {
+            "name": "Catalog Goblin", "type_line": "Creature — Goblin", "oracle_text": "Haste",
+            "mana_cost": "{R}", "cmc": 1, "colors": ["R"], "color_identity": ["R"],
+            "keywords": ["Haste"], "legalities": {"pauper": "legal"},
+            "scryfall_uri": "https://scryfall.com/card/test/1",
+            "image_uris": {"normal": "https://cards.scryfall.io/normal/front/test.jpg"},
+        }
+        with gzip.open(bulk, "wt", encoding="utf-8") as handle:
+            handle.write(json.dumps(record) + "\n")
+        cards = [{"name": "Forest", "quantity": 60, "type_line": "Basic Land — Forest",
+                  "oracle_text": "", "legalities": {"pauper": "legal", "legacy": "legal"}}]
+        output = self.root / "outputs" / "pauper"
+        output.mkdir(parents=True)
+        (output / "purchase-proposal.json").write_text(json.dumps({
+            "name": "Purchase Proposal", "format": "pauper", "ownership_mode": "proposal",
+            "main": {"Catalog Goblin": 4, "Forest": 56}, "sideboard": {}, "commanders": {},
+        }), encoding="utf-8")
+        handler = web.make_handler({}, architect=web.load_architect(), engine_cards=cards, bulk_path=bulk)
+        server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        thread = Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with patch.object(web, "ROOT", self.root):
+                with urlopen("http://127.0.0.1:{}/api/decks".format(server.server_port)) as response:
+                    decks = json.loads(response.read())
+                deck = next(item for item in decks if item["name"] == "Purchase Proposal")
+                self.assertIn("pauper", deck["compatible_formats"])
+                self.assertEqual(deck["display_cards"]["Catalog Goblin"]["oracleText"], "Haste")
+                self.assertTrue(deck["validation"]["valid"])
+                self.assertFalse(deck["validation"]["collection_complete"])
+                csv_url = "http://127.0.0.1:{}/api/decks/unowned.csv?format=pauper&name=Purchase%20Proposal".format(server.server_port)
+                with urlopen(csv_url) as response:
+                    rows = list(csv.DictReader(response.read().decode("utf-8-sig").splitlines()))
+                self.assertEqual(rows[0]["Cardmarket import line"], "4 Catalog Goblin")
+                self.assertEqual(rows[0]["Oracle text"], "Haste")
+                self.assertTrue((output / "purchase-proposal-unowned.csv").is_file())
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_proposal_bundle_exports_unowned_cards_with_scryfall_oracle_details(self):
+        catalog_card = {
+            "name": "Catalog Goblin", "quantity": 0, "type_line": "Creature — Goblin",
+            "oracle_text": "Haste", "mana_cost": "{R}", "mana_value": 1,
+            "scryfall_uri": "https://scryfall.com/card/test/1",
+        }
+        deck = {
+            "name": "Purchase Proposal", "format": "pauper", "ownership_mode": "proposal",
+            "main": {"Catalog Goblin": 4, "Forest": 56}, "sideboard": {}, "commanders": {},
+            "card_catalog": [catalog_card],
+            "validation": {"valid": True, "collection_complete": False, "counts": {"main": 60},
+                           "allocation_report": [{"card_name": "Catalog Goblin", "needed": 4,
+                                                  "owned": 0, "reserved_elsewhere": 0,
+                                                  "available": 0, "shortage": 4, "locations": []}]},
+        }
+
+        files = web.load_architect().save_bundle(deck, [], self.root / "outputs")
+
+        csv_path = self.root / "outputs" / "pauper" / "purchase-proposal-unowned.csv"
+        self.assertEqual(files.get("unowned_csv"), str(csv_path))
+        with csv_path.open(encoding="utf-8-sig", newline="") as handle:
+            row = next(csv.DictReader(handle))
+        self.assertEqual(row["Card"], "Catalog Goblin")
+        self.assertEqual(row["Missing copies"], "4")
+        self.assertEqual(row["Oracle text"], "Haste")
+        self.assertEqual(row["Scryfall URL"], catalog_card["scryfall_uri"])
+
+    def test_purchase_summary_alone_can_export_missing_cards_csv(self):
+        deck = {
+            "name": "Owned Inventory Gap", "format": "pauper",
+            "main": {"Catalog Goblin": 4}, "sideboard": {}, "commanders": {},
+            "card_catalog": [{"name": "Catalog Goblin", "type_line": "Creature — Goblin",
+                              "oracle_text": "Haste", "mana_cost": "{R}", "mana_value": 1,
+                              "scryfall_uri": "https://scryfall.com/card/test/1"}],
+            "ownership_summary": {"cards_to_buy": [{"card": "Catalog Goblin", "deck_count": 4,
+                                                        "owned": 0, "to_buy": 4}]},
+        }
+
+        files = web.load_architect().save_bundle(deck, [], self.root / "outputs")
+
+        csv_path = self.root / "outputs" / "pauper" / "owned-inventory-gap-unowned.csv"
+        self.assertEqual(files.get("unowned_csv"), str(csv_path))
+        with csv_path.open(encoding="utf-8-sig", newline="") as handle:
+            row = next(csv.DictReader(handle))
+        self.assertEqual(row["Cardmarket import line"], "4 Catalog Goblin")
+
+    def test_deck_view_marks_unowned_cards_and_shows_oracle_details(self):
+        app_script = (Path(web.ROOT) / "web" / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn("state.deckInfo?.display_cards", app_script)
+        self.assertIn("NOT OWNED", app_script)
+        self.assertIn("SHORT", app_script)
+        self.assertIn("oracleText", app_script)
+
     def test_deck_submission_preserves_existing_primer_and_forge_evidence(self):
         report = {"primary_objective": "Win through a resilient Angel engine."}
         evidence = {"status": "completed", "completed_games": 10, "wins": 4, "losses": 6}
