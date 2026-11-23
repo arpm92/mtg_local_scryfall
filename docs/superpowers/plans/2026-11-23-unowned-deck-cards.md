@@ -19,18 +19,19 @@
 
 ### Task 1: Resolve and validate proposal card records
 
-- [ ] Add failing tests for Scryfall-known unowned cards passing format legality, while ownership gaps remain visible.
-- [ ] Add cache lookup and deck catalog handling; keep inventory quantities unchanged.
-- [ ] Verify targeted backend tests.
+- [x] Add failing tests for Scryfall-known unowned cards passing format legality, while ownership gaps remain visible.
+- [x] Add cache lookup and deck catalog handling; keep inventory quantities unchanged.
+- [x] Verify targeted backend tests.
 
 ### Task 2: Render unowned cards and export the missing list
 
-- [ ] Add failing tests for corner ribbons, Oracle details, and the unowned CSV contents.
-- [ ] Update deck cards to use Scryfall catalog fallbacks, show `NOT OWNED` / `SHORT n`, and expose Oracle text.
-- [ ] Generate the proposal's UTF-8 CSV in the saved deck bundle.
-- [ ] Run the full test suite and validate 60/15 counts and ownership figures.
+- [x] Add failing tests for corner ribbons, Oracle details, and the unowned CSV contents.
+- [x] Update deck cards to use Scryfall catalog fallbacks, show `NOT OWNED` / `SHORT n`, and expose Oracle text.
+- [x] Generate the proposal's UTF-8 CSV in the saved deck bundle.
+- [x] Run the full test suite (113 passed) and validate CSV and ownership figures.
 
 ### Task 3: Update the server copy
 
-- [ ] Push/deploy the implementation through the existing Portainer stack after local verification.
-- [ ] Re-save the Pauper proposal through the app, then verify it appears under Pauper with Scryfall details and its missing-cards CSV.
+- [x] Push the implementation to `main` (`3b19153`).
+- [ ] Redeploy the Portainer stack; it is still serving the old API response.
+- [ ] Verify the Pauper proposal appears under Pauper with Scryfall details and its missing-cards CSV.
